@@ -1,0 +1,14 @@
+includes:
+  - paths.yaml
+  - detection.yaml
+  - rl.yaml
+  - inference.yaml
+
+classes:
+  target_classes:
+    - 0
+    - 2
+    - 3
+    - 5
+    - 8
+    - 9

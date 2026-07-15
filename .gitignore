@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+
+# Dataset artifacts
+data/cache/
+data/processed/
+data/raw/images/
+data/
+
+!yolo11s.pt
+
+*.jpg
+.agents/
+.vscode/
+.aider*
+
+*.txt
+*.json
+
+papers/

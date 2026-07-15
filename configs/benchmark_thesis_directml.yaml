@@ -1,0 +1,5 @@
+includes:
+  - benchmark_thesis.yaml
+
+infer:
+  device: "directml"

@@ -1,0 +1,42 @@
+infer:
+  full_imgsz: 640
+  slice_imgsz: 640
+  full_conf: 0.01
+  output_conf: 0.30
+  iou: 0.7
+  merge_iou: 0.5
+  max_det: 3000
+  min_slice_detections: 1
+  min_slice_utility: 0.8
+  min_new_detection_score: 0.45
+  duplicate_iou: 0.4
+  max_slice_attempts: 6
+  crop_batch_size: 3
+  max_consecutive_rejections: 2
+  require_stop_for_acceptance: true
+  save_predictions: true
+  save_metadata: true
+  save_visualization: false
+  batched_inference: false
+  device: "cuda"
+  feature_layers:
+    - 16
+  use_cache: true
+
+benchmark:
+  iou_threshold: 0.5
+  fixed_slice_fraction: 0.35
+  fixed_overlap: 0.2
+  budgeted_crop_counts:
+    - 4
+    - 8
+    - 12
+  proposal_crop_count: 8
+  proposal_min_conf: 0.01
+  proposal_max_conf: 0.5
+  proposal_peak_conf: 0.25
+  proposal_overlap_threshold: 0.7
+  small_area_ratio: 0.0004
+  small_area_percentile: null
+  sampling: stratified
+  seed: 42
