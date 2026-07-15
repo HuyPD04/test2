@@ -433,6 +433,94 @@ def _predict_rl_sahi(
     attempted_rois: list[np.ndarray] = []
     crop_inference_count = 0
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
+
+    if cfg.batched_inference:
+        candidate_rois: list[np.ndarray] = []
+        attempt_idx = 1
+        while attempt_idx <= max_attempts and len(candidate_rois) < env_cfg.max_slices:
+            history_arr = (
+                np.stack(attempted_rois).astype(np.float32)
+                if attempted_rois
+                else np.zeros((0, 4), dtype=np.float32)
+            )
+            env = SliceEnv(
+                det,
+                None,
+                env_cfg=env_cfg,
+                state_cfg=state_cfg,
+                previous_rois=history_arr,
+                overlap_rois=history_arr,
+                target_classes=cfg.target_classes,
+                class_mapping=cfg.class_mapping,
+            )
+            roi, _actions, info = rollout_one_slice(policy, env, device_t)
+            repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
+            attempted_rois.append(roi)
+            if _skip_crop_reason(info, cfg) is not None:
+                if repeat_attempt_overlap >= 0.95:
+                    break
+            else:
+                candidate_rois.append(roi)
+            attempt_idx += 1
+
+        if candidate_rois:
+            predictions = run_yolo_on_crops(
+                model,
+                [image_path] * len(candidate_rois),
+                candidate_rois,
+                imgsz=cfg.slice_imgsz,
+                conf=cfg.output_conf,
+                iou=cfg.iou,
+                max_det=cfg.max_det,
+                device=cfg.device,
+            )
+            crop_inference_count = len(candidate_rois)
+            for roi, (boxes_i, scores_i, classes_i) in zip(candidate_rois, predictions):
+                classes_i = cfg.class_mapping.map_model_classes(classes_i)
+                boxes_i, scores_i, classes_i = _filter_classes(
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    cfg.target_classes,
+                )
+                new_detection_gain, new_detection_utility, new_detection_max_score = (
+                    _new_detection_stats(
+                        full_boxes,
+                        full_scores,
+                        full_classes,
+                        slice_boxes_all,
+                        slice_scores_all,
+                        slice_classes_all,
+                        boxes_i,
+                        scores_i,
+                        classes_i,
+                        det.image_shape,
+                        cfg.merge_iou,
+                        cfg.duplicate_iou,
+                    )
+                )
+                if _crop_rejection_reason(
+                    len(boxes_i),
+                    new_detection_gain,
+                    new_detection_utility,
+                    new_detection_max_score,
+                    cfg,
+                ) is not None:
+                    continue
+                accepted_rois.append(roi)
+                slice_boxes_all.append(boxes_i)
+                slice_scores_all.append(scores_i)
+                slice_classes_all.append(classes_i)
+
+        boxes, scores, classes = _merge_predictions(
+            det.image_shape,
+            cfg.merge_iou,
+            [full_boxes, *slice_boxes_all],
+            [full_scores, *slice_scores_all],
+            [full_classes, *slice_classes_all],
+        )
+        return boxes, scores, classes, len(accepted_rois), crop_inference_count
+
     crop_batch_size = max(int(cfg.crop_batch_size), 1)
     attempt_idx = 1
     stop_attempts = False

@@ -11,8 +11,8 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | ASAHI (12 slices) | ASAHI paper | 29.3 | 41.9 | 22.8 | 2.98 |
 | ASAHI (15 slices) | ASAHI paper | 27.2 | 40.9 | 21.3 | 2.39 |
 | ASAHI (adaptive) | ASAHI paper | 30.4 | 45.6 | 25.2 | 4.88 |
-| YOLO11s only | local | 14.38 | 23.39 | 15.44 | 26.88 |
-| RL-SAHI (proposed) | local | 14.97 | 24.79 | 15.80 | 3.77 |
+| YOLO11s only | local | 14.38 | 23.39 | 15.44 | 28.05 |
+| RL-SAHI (proposed) | local | 14.97 | 24.79 | 15.80 | 3.83 |
 
 > ASAHI paper values are reference-only: its TPH-YOLOv5 detector and hardware differ from the local YOLO11s pipeline, so the speed values are not controlled hardware comparisons.
 
@@ -42,12 +42,12 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 
 | Method | Latency (ms/image) | Speed (img/s) | Slices/image | Detector calls/image | Effective GFLOPs |
 |---|---:|---:|---:|---:|---:|
-| YOLO11s only | 37.2 | 26.88 | 0.00 | 1.00 | 21.5 |
-| SAHI budget 4 | 92.9 | 10.76 | 4.00 | 5.00 | 107.5 |
-| SAHI budget 6 | 114.2 | 8.76 | 6.00 | 7.00 | 150.5 |
-| SAHI budget 12 | 193.2 | 5.18 | 12.00 | 13.00 | 279.5 |
-| SAHI budget 15 | 237.7 | 4.21 | 15.00 | 16.00 | 344.0 |
-| RL-SAHI | 265.3 | 3.77 | 3.18 | 4.18 | 89.9 |
+| YOLO11s only | 35.7 | 28.05 | 0.00 | 1.00 | 21.5 |
+| SAHI budget 4 | 90.9 | 11.00 | 4.00 | 5.00 | 107.5 |
+| SAHI budget 6 | 111.4 | 8.97 | 6.00 | 7.00 | 150.5 |
+| SAHI budget 12 | 189.4 | 5.28 | 12.00 | 13.00 | 279.5 |
+| SAHI budget 15 | 233.6 | 4.28 | 15.00 | 16.00 | 344.0 |
+| RL-SAHI | 261.3 | 3.83 | 3.18 | 4.18 | 89.9 |
 
 ## Per-class AP - proposed method
 
