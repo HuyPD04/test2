@@ -154,6 +154,52 @@ class SliceEnv:
         info["hard_total"] = int(len(self.hard_boxes))
         return StepResult(self._state(), reward, done, info)
 
+    def step_inference(self, action: int | Action) -> StepResult:
+        """Advance the environment without reward-only calculations.
+
+        Inference only consumes the next state, termination flags, and overlap
+        metadata. Reward shaping does not affect any of those values when hard
+        regions are absent, so skipping it avoids repeated scoring and device
+        synchronization during policy rollout.
+        """
+        action = Action(int(action))
+        done = action == Action.STOP
+        stalled_roi = False
+        previous_roi = self.roi.copy()
+        if action != Action.STOP:
+            self.roi = self._apply_action(action)
+            stalled_roi = bool(np.allclose(previous_roi, self.roi, atol=1e-3))
+            self.step_index += 1
+            self.history = mark_history(self.history, self.roi, self.image_shape, self.state_cfg.grid_size)
+
+        old_slice_overlap = self._old_slice_overlap()
+        attempted_slice_overlap = self._attempted_slice_overlap()
+        info = {
+            "old_slice_overlap": old_slice_overlap,
+            "attempted_slice_overlap": attempted_slice_overlap,
+        }
+        if stalled_roi:
+            done = True
+        if old_slice_overlap >= self.env_cfg.old_slice_overlap_threshold:
+            done = True
+            info["stop_due_to_old_overlap"] = True
+        else:
+            info["stop_due_to_old_overlap"] = False
+        info["stop_due_to_attempted_overlap"] = bool(
+            action == Action.STOP
+            and attempted_slice_overlap >= self.env_cfg.old_slice_overlap_threshold
+        )
+        if self.step_index >= self.env_cfg.max_steps:
+            done = True
+            info["stop_due_to_max_steps"] = action != Action.STOP
+        else:
+            info["stop_due_to_max_steps"] = False
+        info["stop_due_to_stalled_roi"] = stalled_roi
+        info["roi"] = self.roi.copy()
+        info["covered"] = int(self.covered.sum())
+        info["hard_total"] = int(len(self.hard_boxes))
+        return StepResult(self._state(), 0.0, done, info)
+
     def valid_actions(self) -> np.ndarray:
         valid = np.ones((NUM_ACTIONS,), dtype=bool)
         non_stop_actions = [action for action in Action if action != Action.STOP]

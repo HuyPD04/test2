@@ -425,6 +425,7 @@ def _predict_rl_sahi(
     env_cfg,
     state_cfg: StateConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    env_cfg = replace(env_cfg, use_gpu_box_ops=False)
     full_boxes, full_scores, full_classes = _full_predictions(det, cfg)
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
@@ -955,8 +956,9 @@ def benchmark_split(
         class_mapping=bench_cfg.class_mapping,
     )
     small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
-    model = load_yolo(weights, device=infer_cfg.device)
-    device_t = resolve_torch_device(infer_cfg.device)
+    detector_device_t = resolve_torch_device(infer_cfg.device)
+    model = load_yolo(weights, device=detector_device_t)
+    device_t = resolve_torch_device(infer_cfg.policy_device or infer_cfg.device)
     policy, checkpoint_data = load_policy(checkpoint, device_t)
     env_cfg = checkpoint_data["env_cfg_obj"]
     state_cfg = checkpoint_data.get("state_cfg_obj", StateConfig())
@@ -1244,7 +1246,8 @@ def benchmark_split(
     manifest = {
         "split": split,
         "use_cache": bool(use_cache),
-        "device": str(device_t),
+        "device": str(detector_device_t),
+        "policy_device": str(device_t),
         "python": platform.python_version(),
         "git_revision": _git_revision(project_root),
         "weights": file_fingerprint(weights),

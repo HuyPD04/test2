@@ -238,6 +238,44 @@ class SliceEnvRewardTest(unittest.TestCase):
         for key in ("old_slice_overlap", "attempted_slice_overlap", "detected_overlap", "total_target_score"):
             self.assertAlmostEqual(result_torch.info[key], result_numpy.info[key], places=5)
 
+    def test_inference_step_matches_regular_transition_without_hard_regions(self) -> None:
+        previous = np.array([[5.0, 5.0, 25.0, 25.0]], dtype=np.float32)
+        accepted = np.array([[70.0, 70.0, 95.0, 95.0]], dtype=np.float32)
+        cfg = EnvConfig(max_steps=3, use_gpu_box_ops=False)
+        for action in (Action.RIGHT, Action.ZOOM_IN, Action.STOP):
+            with self.subTest(action=action):
+                regular = SliceEnv(
+                    _high_conf_detection_cache(0),
+                    None,
+                    env_cfg=cfg,
+                    previous_rois=previous,
+                    overlap_rois=accepted,
+                )
+                inference = SliceEnv(
+                    _high_conf_detection_cache(0),
+                    None,
+                    env_cfg=cfg,
+                    previous_rois=previous,
+                    overlap_rois=accepted,
+                )
+                np.testing.assert_array_equal(regular.reset(), inference.reset())
+
+                expected = regular.step(action)
+                actual = inference.step_inference(action)
+
+                np.testing.assert_array_equal(actual.state, expected.state)
+                np.testing.assert_array_equal(inference.roi, regular.roi)
+                self.assertEqual(actual.done, expected.done)
+                for key in (
+                    "old_slice_overlap",
+                    "attempted_slice_overlap",
+                    "stop_due_to_old_overlap",
+                    "stop_due_to_attempted_overlap",
+                    "stop_due_to_max_steps",
+                    "stop_due_to_stalled_roi",
+                ):
+                    self.assertEqual(actual.info[key], expected.info[key])
+
     def test_state_has_separate_current_attempted_and_accepted_roi_maps(self) -> None:
         base_env = SliceEnv(_detection_cache(), None, env_cfg=EnvConfig())
         base_env.reset()

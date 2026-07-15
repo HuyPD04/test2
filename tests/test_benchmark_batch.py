@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -14,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from rl_sahi.common.cache import DetectionCache
 from rl_sahi.eval.benchmark import _predict_rl_sahi
 from rl_sahi.inference.config import InferenceConfig
+from rl_sahi.rl.env_config import EnvConfig
 from rl_sahi.rl.state_config import StateConfig
 
 
@@ -64,7 +64,7 @@ class BenchmarkBatchInferenceTest(unittest.TestCase):
                     max_slice_attempts=3,
                     target_classes=(),
                 ),
-                env_cfg=SimpleNamespace(max_slices=3),
+                env_cfg=EnvConfig(max_slices=3),
                 state_cfg=StateConfig(),
             )
 

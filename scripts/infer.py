@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--image", type=Path, default=None)
     parser.add_argument("--split", default=None, choices=["train", "val", "test"])
     parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--policy-device", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--visualize", action="store_true")
@@ -38,7 +39,9 @@ def main() -> None:
     cfg = load_default_config(args.config, ROOT)
     infer_cfg = cfg.section("infer")
     device = cfg.optional_str("infer", "device")
+    policy_device = args.policy_device or cfg.optional_str("infer", "policy_device") or device
     print_device_info("infer", device)
+    print_device_info("infer-policy", policy_device)
     target_classes = cfg.target_classes()
 
     if args.image is not None:
@@ -72,6 +75,7 @@ def main() -> None:
             merge_iou=float(infer_cfg["merge_iou"]),
             max_det=int(infer_cfg["max_det"]),
             device=device,
+            policy_device=policy_device,
             feature_layers=cfg.feature_layers("infer"),
             min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
             min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),

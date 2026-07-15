@@ -110,6 +110,7 @@ def main() -> None:
             merge_iou=float(infer_cfg["merge_iou"]),
             max_det=int(infer_cfg["max_det"]),
             device=device_name or cfg.optional_str("infer", "device"),
+            policy_device=cfg.optional_str("infer", "policy_device"),
             feature_layers=cfg.feature_layers("infer"),
             min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
             min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),

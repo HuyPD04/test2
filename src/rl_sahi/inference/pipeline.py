@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -350,7 +350,8 @@ def get_initial_detection(
 class AdaptiveSahiInferencer:
     def __init__(self, weights: Path, checkpoint: Path, cfg: InferenceConfig) -> None:
         self.cfg = cfg
-        self.device_t = resolve_torch_device(cfg.device)
+        self.device_t = resolve_torch_device(cfg.policy_device or cfg.device)
+        self.yolo_device_t = resolve_torch_device(cfg.device)
         self.policy, checkpoint_data = load_policy(checkpoint, self.device_t)
         self.env_cfg = checkpoint_data["env_cfg_obj"]
         self.state_cfg = checkpoint_data.get("state_cfg_obj", StateConfig())
@@ -374,7 +375,7 @@ class AdaptiveSahiInferencer:
             "checkpoint": file_fingerprint(Path(checkpoint)),
             "inference_config": asdict(cfg),
         }
-        self.yolo = load_yolo(weights, device=self.device_t)
+        self.yolo = load_yolo(weights, device=self.yolo_device_t)
 
     def infer_image(
         self,
@@ -441,6 +442,7 @@ def _infer_with_loaded(
 ) -> dict:
     if request_start is None:
         request_start = time.perf_counter()
+    env_cfg = replace(env_cfg, use_gpu_box_ops=False)
     timing = {
         "initial_detection_ms": float(initial_detection_ms),
         "rollout_ms": 0.0,
@@ -867,6 +869,7 @@ def infer_one_image(
     merge_iou: float | None = None,
     max_det: int | None = None,
     device: str | None = None,
+    policy_device: str | None = None,
     feature_layers: tuple[int, ...] | list[int] | str | None = None,
     min_slice_detections: int | None = None,
     min_slice_utility: float | None = None,
@@ -902,6 +905,11 @@ def infer_one_image(
         merge_iou=_value_or_config(infer_cfg, "merge_iou", merge_iou, float),
         max_det=_value_or_config(infer_cfg, "max_det", max_det, int),
         device=device if device is not None else project_cfg.optional_str("infer", "device"),
+        policy_device=(
+            policy_device
+            if policy_device is not None
+            else project_cfg.optional_str("infer", "policy_device")
+        ),
         feature_layers=_feature_layers_or_config(project_cfg, feature_layers),
         min_slice_detections=_value_or_config(infer_cfg, "min_slice_detections", min_slice_detections, int),
         min_slice_utility=(
