@@ -51,6 +51,7 @@ class BenchmarkConfig:
     small_area_percentile: float | None = None
     sampling: str = "stratified"
     seed: int = 42
+    warmup_images: int = 10
     detector_gflops: float = 21.5
     agent_gflops: float = 0.0
     target_classes: tuple[int, ...] = (0, 2, 3, 5, 8, 9)
@@ -167,6 +168,12 @@ def select_benchmark_images(
             break
         offset += 1
     return selected
+
+
+def _effective_warmup_images(total_images: int, requested: int) -> int:
+    if requested < 0:
+        raise ValueError("benchmark.warmup_images must be non-negative")
+    return min(int(requested), max(int(total_images) - 1, 0))
 
 
 def _git_revision(project_root: Path) -> str | None:
@@ -894,8 +901,17 @@ def benchmark_split(
     accepted_crops = {key: [] for key in predictions}
     latency = {key: [] for key in predictions}
     initial_state_latency: list[float] = []
+    warmup_images = _effective_warmup_images(len(images), bench_cfg.warmup_images)
+    timed_images = len(images) - warmup_images
+    if warmup_images:
+        print(
+            f"[benchmark] {split}: warming up on the first {warmup_images} images; "
+            f"latency uses the remaining {timed_images}",
+            flush=True,
+        )
 
     for image_index, image_path in enumerate(images, start=1):
+        measure_latency = image_index > warmup_images
         if image_index == 1 or image_index % 25 == 0 or image_index == len(images):
             print(
                 f"[benchmark] {split}: image {image_index}/{len(images)} ({image_path.name})",
@@ -929,13 +945,15 @@ def benchmark_split(
             split=split,
             use_cache=use_cache,
         )
-        initial_state_latency.append(time.perf_counter() - initial_start)
+        if measure_latency:
+            initial_state_latency.append(time.perf_counter() - initial_start)
 
         full_predictions = _full_predictions(det, infer_cfg)
 
         start = time.perf_counter()
         predictions["yolo_full"][image_id] = full_predictions
-        latency["yolo_full"].append(time.perf_counter() - start)
+        if measure_latency:
+            latency["yolo_full"].append(time.perf_counter() - start)
         crops["yolo_full"].append(0)
         accepted_crops["yolo_full"].append(0)
 
@@ -964,7 +982,10 @@ def benchmark_split(
                 list(range(len(fixed_rois))),
             )
             predictions["fixed_grid_sahi"][image_id] = (boxes, scores, classes)
-            latency["fixed_grid_sahi"].append(fixed_crop_latency + time.perf_counter() - post_start)
+            if measure_latency:
+                latency["fixed_grid_sahi"].append(
+                    fixed_crop_latency + time.perf_counter() - post_start
+                )
             crops["fixed_grid_sahi"].append(crop_count)
             accepted_crops["fixed_grid_sahi"].append(accepted_crop_count)
             if bench_cfg.include_gated_variants:
@@ -978,9 +999,10 @@ def benchmark_split(
                     gated=True,
                 )
                 predictions["fixed_grid_sahi_gated"][image_id] = (boxes, scores, classes)
-                latency["fixed_grid_sahi_gated"].append(
-                    fixed_crop_latency + time.perf_counter() - post_start
-                )
+                if measure_latency:
+                    latency["fixed_grid_sahi_gated"].append(
+                        fixed_crop_latency + time.perf_counter() - post_start
+                    )
                 crops["fixed_grid_sahi_gated"].append(crop_count)
                 accepted_crops["fixed_grid_sahi_gated"].append(accepted_crop_count)
 
@@ -1013,7 +1035,8 @@ def benchmark_split(
                 list(range(len(selected_rois))),
             )
             predictions[method][image_id] = (boxes, scores, classes)
-            latency[method].append(crop_latency + time.perf_counter() - post_start)
+            if measure_latency:
+                latency[method].append(crop_latency + time.perf_counter() - post_start)
             crops[method].append(crop_count)
             accepted_crops[method].append(accepted_crop_count)
             if bench_cfg.include_gated_variants:
@@ -1028,7 +1051,8 @@ def benchmark_split(
                     gated=True,
                 )
                 predictions[gated_method][image_id] = (boxes, scores, classes)
-                latency[gated_method].append(crop_latency + time.perf_counter() - post_start)
+                if measure_latency:
+                    latency[gated_method].append(crop_latency + time.perf_counter() - post_start)
                 crops[gated_method].append(crop_count)
                 accepted_crops[gated_method].append(accepted_crop_count)
 
@@ -1055,7 +1079,10 @@ def benchmark_split(
                 list(range(len(proposal_rois))),
             )
             predictions[proposal_method][image_id] = (boxes, scores, classes)
-            latency[proposal_method].append(proposal_crop_latency + time.perf_counter() - post_start)
+            if measure_latency:
+                latency[proposal_method].append(
+                    proposal_crop_latency + time.perf_counter() - post_start
+                )
             crops[proposal_method].append(crop_count)
             accepted_crops[proposal_method].append(accepted_crop_count)
             if bench_cfg.include_gated_variants:
@@ -1069,9 +1096,10 @@ def benchmark_split(
                     gated=True,
                 )
                 predictions[proposal_gated_method][image_id] = (boxes, scores, classes)
-                latency[proposal_gated_method].append(
-                    proposal_crop_latency + time.perf_counter() - post_start
-                )
+                if measure_latency:
+                    latency[proposal_gated_method].append(
+                        proposal_crop_latency + time.perf_counter() - post_start
+                    )
                 crops[proposal_gated_method].append(crop_count)
                 accepted_crops[proposal_gated_method].append(accepted_crop_count)
 
@@ -1080,7 +1108,8 @@ def benchmark_split(
             model, policy, device_t, image_path, det, infer_cfg, env_cfg, state_cfg
         )
         predictions["rl_sahi"][image_id] = (boxes, scores, classes)
-        latency["rl_sahi"].append(time.perf_counter() - start)
+        if measure_latency:
+            latency["rl_sahi"].append(time.perf_counter() - start)
         crops["rl_sahi"].append(crop_count)
         accepted_crops["rl_sahi"].append(accepted_crop_count)
 
@@ -1116,6 +1145,8 @@ def benchmark_split(
                     bench_cfg.agent_gflops + bench_cfg.detector_gflops * (1.0 + crop_mean)
                 ),
                 "images": float(len(images)),
+                "warmup_images": float(warmup_images),
+                "timed_images": float(timed_images),
                 "small_area_threshold": small_threshold,
             }
         )
@@ -1131,6 +1162,8 @@ def benchmark_split(
         "weights": file_fingerprint(weights),
         "checkpoint": file_fingerprint(checkpoint),
         "images": [image.name for image in images],
+        "warmup_images": warmup_images,
+        "timed_images": timed_images,
         "inference_config": asdict(infer_cfg),
         "benchmark_config": asdict(bench_cfg),
     }

@@ -106,6 +106,7 @@ def main() -> None:
             ),
             sampling=str(args.sampling or benchmark_cfg.get("sampling", "stratified")),
             seed=int(args.seed if args.seed is not None else benchmark_cfg.get("seed", 42)),
+            warmup_images=int(benchmark_cfg.get("warmup_images", 10)),
             detector_gflops=float(benchmark_cfg.get("detector_gflops", 21.5)),
             agent_gflops=float(benchmark_cfg.get("agent_gflops", 0.0)),
             target_classes=target_classes,

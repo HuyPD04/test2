@@ -17,7 +17,7 @@ infer:
   save_predictions: true
   save_metadata: true
   save_visualization: false
-  batched_inference: false
+  batched_inference: true
   device: "cuda"
   feature_layers:
     - 16

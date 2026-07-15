@@ -9,7 +9,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from rl_sahi.eval.benchmark import _precision_recall_at_iou, select_benchmark_images
+from rl_sahi.eval.benchmark import (
+    _effective_warmup_images,
+    _precision_recall_at_iou,
+    select_benchmark_images,
+)
 from rl_sahi.common.config import load_default_config
 
 
@@ -33,6 +37,13 @@ class BenchmarkSamplingTest(unittest.TestCase):
         first = select_benchmark_images(images, limit=11, sampling="stratified", seed=42)
         second = select_benchmark_images(images, limit=11, sampling="stratified", seed=42)
         self.assertEqual(first, second)
+
+    def test_warmup_uses_ten_images_by_default_for_larger_runs(self) -> None:
+        self.assertEqual(_effective_warmup_images(100, 10), 10)
+
+    def test_warmup_always_leaves_one_timed_image(self) -> None:
+        self.assertEqual(_effective_warmup_images(5, 10), 4)
+        self.assertEqual(_effective_warmup_images(1, 10), 0)
 
     def test_precision_recall_are_micro_averaged_at_iou(self) -> None:
         ground_truth = {

@@ -106,6 +106,28 @@ def main() -> None:
             f"crops={meta['num_crop_predictions']}/{meta['num_crop_batches']} "
             f"time={total_ms:.1f}ms crop={crop_ms:.1f}ms"
         )
+        print(
+            f"[timing] {image_path.name}: "
+            f"full={float(timing.get('initial_detection_ms', 0.0)):.1f}ms "
+            f"(read={float(timing.get('initial_image_read_ms', 0.0)):.1f} "
+            f"call={float(timing.get('initial_yolo_wall_ms', 0.0)):.1f} "
+            f"pre={float(timing.get('initial_preprocess_ms', 0.0)):.1f} "
+            f"yolo={float(timing.get('initial_yolo_inference_ms', 0.0)):.1f} "
+            f"post={float(timing.get('initial_postprocess_ms', 0.0)):.1f} "
+            f"feat={float(timing.get('initial_feature_extract_ms', 0.0)):.1f} "
+            f"d2h={float(timing.get('initial_result_transfer_ms', 0.0)):.1f}) "
+            f"crop={crop_ms:.1f}ms "
+            f"(read={float(timing.get('crop_image_read_ms', 0.0)):.1f} "
+            f"extract={float(timing.get('crop_extract_ms', 0.0)):.1f} "
+            f"call={float(timing.get('crop_yolo_wall_ms', 0.0)):.1f} "
+            f"pre={float(timing.get('crop_preprocess_ms', 0.0)):.1f} "
+            f"yolo={float(timing.get('crop_yolo_inference_ms', 0.0)):.1f} "
+            f"post={float(timing.get('crop_postprocess_ms', 0.0)):.1f} "
+            f"d2h={float(timing.get('crop_result_transfer_ms', 0.0)):.1f}) "
+            f"rollout={float(timing.get('rollout_ms', 0.0)):.1f}ms "
+            f"merge={float(timing.get('merge_ms', 0.0)):.1f}ms "
+            f"write={float(timing.get('write_outputs_ms', 0.0)):.1f}ms"
+        )
 
 
 if __name__ == "__main__":

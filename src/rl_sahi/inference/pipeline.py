@@ -294,6 +294,7 @@ def get_initial_detection(
     cache_root: Path | str | None = None,
     split: str | None = None,
     use_cache: bool = True,
+    timing: dict[str, float] | None = None,
 ) -> DetectionCache:
     expected_metadata = (
         detection_cache_metadata(
@@ -324,6 +325,7 @@ def get_initial_detection(
             feature_layers=feature_layers,
             aux_grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
+            timing=timing,
         )
         det.metadata = expected_metadata
         save_detection_cache(cache_path, det)
@@ -339,6 +341,7 @@ def get_initial_detection(
         feature_layers=feature_layers,
         aux_grid_size=aux_grid_size,
         spatial_feature_channels=spatial_feature_channels,
+        timing=timing,
     )
     det.metadata = expected_metadata
     return det
@@ -384,6 +387,7 @@ class AdaptiveSahiInferencer:
         cfg = self.cfg
         request_start = time.perf_counter()
         detection_start = time.perf_counter()
+        initial_timing: dict[str, float] = {}
         det = get_initial_detection(
             model=self.yolo,
             weights=self.weights,
@@ -399,6 +403,7 @@ class AdaptiveSahiInferencer:
             cache_root=cache_root,
             split=split,
             use_cache=use_cache,
+            timing=initial_timing,
         )
         initial_detection_ms = (time.perf_counter() - detection_start) * 1000.0
 
@@ -413,6 +418,7 @@ class AdaptiveSahiInferencer:
             det=det,
             cfg=cfg,
             initial_detection_ms=initial_detection_ms,
+            initial_timing=initial_timing,
             request_start=request_start,
             provenance=self.provenance,
         )
@@ -429,6 +435,7 @@ def _infer_with_loaded(
     det: DetectionCache,
     cfg: InferenceConfig,
     initial_detection_ms: float = 0.0,
+    initial_timing: dict[str, float] | None = None,
     request_start: float | None = None,
     provenance: dict | None = None,
 ) -> dict:
@@ -442,6 +449,8 @@ def _infer_with_loaded(
         "write_outputs_ms": 0.0,
         "total_ms": 0.0,
     }
+    if initial_timing:
+        timing.update({key: float(value) for key, value in initial_timing.items()})
     accepted_rois: list[np.ndarray] = []
     rejected_rois: list[np.ndarray] = []
     attempted_rois: list[np.ndarray] = []
@@ -534,6 +543,7 @@ def _infer_with_loaded(
                 iou=cfg.iou,
                 max_det=cfg.max_det,
                 device=cfg.device,
+                timing=timing,
             )
             timing["crop_inference_ms"] = (time.perf_counter() - crop_start) * 1000.0
             crop_prediction_count = len(candidate_rois)
@@ -674,6 +684,7 @@ def _infer_with_loaded(
                 iou=cfg.iou,
                 max_det=cfg.max_det,
                 device=cfg.device,
+                timing=timing,
             )
             timing["crop_inference_ms"] += (time.perf_counter() - crop_start) * 1000.0
             crop_prediction_count += len(pending)

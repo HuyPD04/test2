@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import cv2
@@ -56,6 +57,7 @@ def run_yolo_on_crops(
     iou: float,
     max_det: int,
     device: DeviceLike,
+    timing: dict[str, float] | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     if len(image_paths) != len(rois):
         raise ValueError("image_paths and rois must have the same length")
@@ -73,11 +75,15 @@ def run_yolo_on_crops(
         image_path = Path(image_path)
         image = image_cache.get(image_path)
         if image is None:
+            read_start = time.perf_counter()
             image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            _add_timing(timing, "crop_image_read_ms", _elapsed_ms(read_start))
             if image is None:
                 raise FileNotFoundError(f"Cannot read image: {image_path}")
             image_cache[image_path] = image
+        extract_start = time.perf_counter()
         crop, offset = crop_array(image, roi)
+        _add_timing(timing, "crop_extract_ms", _elapsed_ms(extract_start))
         if crop.size == 0:
             continue
         crops.append(crop)
@@ -89,6 +95,7 @@ def run_yolo_on_crops(
 
     resolved_device = configure_torch_runtime(device)
     configure_ultralytics_for_device(resolved_device)
+    predict_start = time.perf_counter()
     results = model.predict(
         crops,
         imgsz=imgsz,
@@ -99,6 +106,9 @@ def run_yolo_on_crops(
         device=resolved_device,
         verbose=False,
     )
+    _add_timing(timing, "crop_yolo_wall_ms", _elapsed_ms(predict_start))
+    _add_result_speeds(timing, results, "crop")
+    transfer_start = time.perf_counter()
     for output_index, offset, result in zip(output_indices, offsets, results):
         if result.boxes is None or len(result.boxes) == 0:
             continue
@@ -108,4 +118,28 @@ def run_yolo_on_crops(
         scores = result.boxes.conf.detach().cpu().numpy().astype(np.float32)
         classes = result.boxes.cls.detach().cpu().numpy().astype(np.float32)
         outputs[output_index] = (boxes, scores, classes)
+    _add_timing(timing, "crop_result_transfer_ms", _elapsed_ms(transfer_start))
     return outputs
+
+
+def _elapsed_ms(start: float) -> float:
+    return (time.perf_counter() - start) * 1000.0
+
+
+def _add_timing(timing: dict[str, float] | None, key: str, value: float) -> None:
+    if timing is not None:
+        timing[key] = float(timing.get(key, 0.0)) + float(value)
+
+
+def _add_result_speeds(timing: dict[str, float] | None, results, prefix: str) -> None:
+    if timing is None:
+        return
+    key_map = {
+        "preprocess": f"{prefix}_preprocess_ms",
+        "inference": f"{prefix}_yolo_inference_ms",
+        "postprocess": f"{prefix}_postprocess_ms",
+    }
+    for result in results:
+        speed = getattr(result, "speed", None) or {}
+        for speed_key, timing_key in key_map.items():
+            _add_timing(timing, timing_key, float(speed.get(speed_key, 0.0)))
