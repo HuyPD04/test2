@@ -14,7 +14,6 @@ data/
 .vscode/
 .aider*
 
-*.txt
 *.json
 
 papers/
