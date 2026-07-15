@@ -40,7 +40,7 @@ def save_inference_visual(
 ) -> None:
     image = read_image(image_path)
     draw_detections(image, boxes, sources)
-    draw_boxes(image, rejected_rois, (0, 165, 255), thickness=2)
+    # draw_boxes(image, rejected_rois, (0, 165, 255), thickness=2)
     draw_boxes(image, accepted_rois, (0, 0, 255), thickness=2)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
