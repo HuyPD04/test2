@@ -36,10 +36,16 @@ def detect_one_image(
     aux_grid_size: int = DEFAULT_AUX_GRID_SIZE,
     spatial_feature_channels: int = DEFAULT_SPATIAL_FEATURE_CHANNELS,
     timing: dict[str, float] | None = None,
+    source_image: np.ndarray | None = None,
 ) -> DetectionCache:
-    shape_start = time.perf_counter()
-    image_shape = read_image_shape(image_path)
-    _add_timing(timing, "initial_image_read_ms", _elapsed_ms(shape_start))
+    if source_image is None:
+        shape_start = time.perf_counter()
+        image_shape = read_image_shape(image_path)
+        _add_timing(timing, "initial_image_read_ms", _elapsed_ms(shape_start))
+        predict_source = str(image_path)
+    else:
+        image_shape = (int(source_image.shape[0]), int(source_image.shape[1]))
+        predict_source = source_image
     resolved_device = configure_torch_runtime(device)
     configure_ultralytics_for_device(resolved_device)
     with FeatureCollector(model, feature_layers) as collector, DetectAuxCollector(model) as aux_collector:
@@ -47,7 +53,7 @@ def detect_one_image(
         aux_collector.clear()
         predict_start = time.perf_counter()
         results = model.predict(
-            source=str(image_path),
+            source=predict_source,
             imgsz=imgsz,
             conf=conf,
             iou=iou,

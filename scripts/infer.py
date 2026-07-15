@@ -112,6 +112,7 @@ def main() -> None:
         )
         print(
             f"[timing] {image_path.name}: "
+            f"load={float(timing.get('image_read_ms', 0.0)):.1f}ms "
             f"full={float(timing.get('initial_detection_ms', 0.0)):.1f}ms "
             f"(read={float(timing.get('initial_image_read_ms', 0.0)):.1f} "
             f"call={float(timing.get('initial_yolo_wall_ms', 0.0)):.1f} "
@@ -129,6 +130,12 @@ def main() -> None:
             f"post={float(timing.get('crop_postprocess_ms', 0.0)):.1f} "
             f"d2h={float(timing.get('crop_result_transfer_ms', 0.0)):.1f}) "
             f"rollout={float(timing.get('rollout_ms', 0.0)):.1f}ms "
+            f"(static={float(timing.get('rollout_static_ms', 0.0)):.1f} "
+            f"env={float(timing.get('rollout_env_init_ms', 0.0)):.1f} "
+            f"state={float(timing.get('rollout_state_ms', 0.0)):.1f} "
+            f"valid={float(timing.get('rollout_valid_ms', 0.0)):.1f} "
+            f"policy={float(timing.get('rollout_policy_ms', 0.0)):.1f} "
+            f"step={float(timing.get('rollout_step_ms', 0.0)):.1f}) "
             f"merge={float(timing.get('merge_ms', 0.0)):.1f}ms "
             f"write={float(timing.get('write_outputs_ms', 0.0)):.1f}ms"
         )

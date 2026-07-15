@@ -21,6 +21,7 @@ from rl_sahi.common.cache import (
 )
 from rl_sahi.common.class_mapping import ClassMapping
 from rl_sahi.common.config import ProjectConfig, load_default_config
+from rl_sahi.common.data import read_image
 from rl_sahi.common.device import DeviceLike, resolve_torch_device
 from rl_sahi.detection.yolo import detect_one_image, load_yolo
 from rl_sahi.inference.config import InferenceConfig
@@ -295,6 +296,7 @@ def get_initial_detection(
     split: str | None = None,
     use_cache: bool = True,
     timing: dict[str, float] | None = None,
+    source_image: np.ndarray | None = None,
 ) -> DetectionCache:
     expected_metadata = (
         detection_cache_metadata(
@@ -326,6 +328,7 @@ def get_initial_detection(
             aux_grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
             timing=timing,
+            source_image=source_image,
         )
         det.metadata = expected_metadata
         save_detection_cache(cache_path, det)
@@ -342,6 +345,7 @@ def get_initial_detection(
         aux_grid_size=aux_grid_size,
         spatial_feature_channels=spatial_feature_channels,
         timing=timing,
+        source_image=source_image,
     )
     det.metadata = expected_metadata
     return det
@@ -387,8 +391,11 @@ class AdaptiveSahiInferencer:
     ) -> dict:
         cfg = self.cfg
         request_start = time.perf_counter()
+        image_read_start = time.perf_counter()
+        source_image = read_image(image_path)
+        image_read_ms = (time.perf_counter() - image_read_start) * 1000.0
         detection_start = time.perf_counter()
-        initial_timing: dict[str, float] = {}
+        initial_timing: dict[str, float] = {"image_read_ms": image_read_ms}
         det = get_initial_detection(
             model=self.yolo,
             weights=self.weights,
@@ -405,6 +412,7 @@ class AdaptiveSahiInferencer:
             split=split,
             use_cache=use_cache,
             timing=initial_timing,
+            source_image=source_image,
         )
         initial_detection_ms = (time.perf_counter() - detection_start) * 1000.0
 
@@ -420,6 +428,7 @@ class AdaptiveSahiInferencer:
             cfg=cfg,
             initial_detection_ms=initial_detection_ms,
             initial_timing=initial_timing,
+            source_image=source_image,
             request_start=request_start,
             provenance=self.provenance,
         )
@@ -437,6 +446,7 @@ def _infer_with_loaded(
     cfg: InferenceConfig,
     initial_detection_ms: float = 0.0,
     initial_timing: dict[str, float] | None = None,
+    source_image: np.ndarray | None = None,
     request_start: float | None = None,
     provenance: dict | None = None,
 ) -> dict:
@@ -453,6 +463,15 @@ def _infer_with_loaded(
     }
     if initial_timing:
         timing.update({key: float(value) for key, value in initial_timing.items()})
+    env_static_start = time.perf_counter()
+    env_static = SliceEnv.build_static_context(
+        det,
+        state_cfg,
+        cfg.target_classes,
+        cfg.class_mapping,
+    )
+    timing["rollout_static_ms"] = (time.perf_counter() - env_static_start) * 1000.0
+    timing["rollout_env_init_ms"] = 0.0
     accepted_rois: list[np.ndarray] = []
     rejected_rois: list[np.ndarray] = []
     attempted_rois: list[np.ndarray] = []
@@ -494,6 +513,7 @@ def _infer_with_loaded(
             )
             # In batched mode, use attempted_rois as overlap check too,
             # since we don't know accepted rois until after YOLO runs.
+            env_init_start = time.perf_counter()
             env = SliceEnv(
                 det,
                 None,
@@ -503,8 +523,10 @@ def _infer_with_loaded(
                 overlap_rois=history_arr,
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
+                static_context=env_static,
             )
-            roi, actions, info = rollout_one_slice(policy, env, device_t)
+            timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
+            roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
             attempted_rois.append(roi)
             skip_reason = _skip_crop_reason(info, cfg)
@@ -531,7 +553,9 @@ def _infer_with_loaded(
             else:
                 candidate_rois.append((attempt_idx, roi, actions, info))
             attempt_idx += 1
-        timing["rollout_ms"] = (time.perf_counter() - rollout_start) * 1000.0
+        timing["rollout_ms"] = timing["rollout_static_ms"] + (
+            time.perf_counter() - rollout_start
+        ) * 1000.0
 
         # Phase 2: Batch YOLO on all candidates at once
         if candidate_rois:
@@ -546,6 +570,7 @@ def _infer_with_loaded(
                 max_det=cfg.max_det,
                 device=cfg.device,
                 timing=timing,
+                source_image=source_image,
             )
             timing["crop_inference_ms"] = (time.perf_counter() - crop_start) * 1000.0
             crop_prediction_count = len(candidate_rois)
@@ -604,6 +629,7 @@ def _infer_with_loaded(
         stop_attempts = False
         consecutive_rejections = 0
         rejection_limit = max(int(cfg.max_consecutive_rejections), 0)
+        timing["rollout_ms"] = timing["rollout_static_ms"]
 
         while attempt_idx <= max_attempts and len(accepted_rois) < env_cfg.max_slices and not stop_attempts:
             remaining_attempts = max_attempts - attempt_idx + 1
@@ -626,6 +652,8 @@ def _infer_with_loaded(
                     if accepted_rois
                     else np.zeros((0, 4), dtype=np.float32)
                 )
+                rollout_start = time.perf_counter()
+                env_init_start = time.perf_counter()
                 env = SliceEnv(
                     det,
                     None,
@@ -635,9 +663,10 @@ def _infer_with_loaded(
                     overlap_rois=overlap_arr,
                     target_classes=cfg.target_classes,
                     class_mapping=cfg.class_mapping,
+                    static_context=env_static,
                 )
-                rollout_start = time.perf_counter()
-                roi, actions, info = rollout_one_slice(policy, env, device_t)
+                timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
+                roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
                 timing["rollout_ms"] += (time.perf_counter() - rollout_start) * 1000.0
                 repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
                 attempted_rois.append(roi)
@@ -687,6 +716,7 @@ def _infer_with_loaded(
                 max_det=cfg.max_det,
                 device=cfg.device,
                 timing=timing,
+                source_image=source_image,
             )
             timing["crop_inference_ms"] += (time.perf_counter() - crop_start) * 1000.0
             crop_prediction_count += len(pending)

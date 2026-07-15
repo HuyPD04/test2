@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 
@@ -24,6 +27,17 @@ from rl_sahi.rl.state_summary import detection_summary
 from rl_sahi.rl.state_vector import build_state_vector, normalize_feature
 
 
+@dataclass(slots=True)
+class SliceEnvStaticContext:
+    det_boxes: np.ndarray
+    det_scores: np.ndarray
+    det_classes: np.ndarray
+    detection_map: np.ndarray
+    feature_state: np.ndarray
+    objectness_state: np.ndarray
+    spatial_feature_state: np.ndarray
+
+
 class SliceEnv:
     def __init__(
         self,
@@ -36,6 +50,7 @@ class SliceEnv:
         previous_covered: np.ndarray | None = None,
         target_classes: tuple[int, ...] = (),
         class_mapping: ClassMapping | None = None,
+        static_context: SliceEnvStaticContext | None = None,
     ) -> None:
         self.detection = detection
         self.hard_regions = hard_regions
@@ -44,21 +59,19 @@ class SliceEnv:
         self.target_classes = tuple(int(x) for x in target_classes)
         self.class_mapping = class_mapping or ClassMapping()
         self.image_shape = detection.image_shape
-        self.det_boxes, self.det_scores, self.det_classes = self._filtered_detections()
-        self.detection_map = build_detection_map(self.det_boxes, self.det_scores, self.image_shape, self.state_cfg)
-        self.feature_state = normalize_feature(self.detection.feature)
-        self.objectness_state = np.nan_to_num(
-            np.asarray(self.detection.objectness_map, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
+        static = static_context or self.build_static_context(
+            detection,
+            self.state_cfg,
+            self.target_classes,
+            self.class_mapping,
         )
-        self.spatial_feature_state = np.nan_to_num(
-            np.asarray(self.detection.spatial_feature_map, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
-        )
+        self.det_boxes = static.det_boxes
+        self.det_scores = static.det_scores
+        self.det_classes = static.det_classes
+        self.detection_map = static.detection_map
+        self.feature_state = static.feature_state
+        self.objectness_state = static.objectness_state
+        self.spatial_feature_state = static.spatial_feature_state
         self.hard_boxes = as_boxes(hard_regions.hard_boxes if hard_regions is not None else np.zeros((0, 4)))
         self.previous_rois = as_boxes(previous_rois if previous_rois is not None else np.zeros((0, 4), dtype=np.float32))
         self.overlap_rois = as_boxes(overlap_rois if overlap_rois is not None else self.previous_rois)
@@ -75,6 +88,40 @@ class SliceEnv:
         self.covered = self.previous_covered.copy()
         self.roi = self._initial_roi()
         self.step_index = 0
+
+    @staticmethod
+    def build_static_context(
+        detection: DetectionCache,
+        state_cfg: StateConfig,
+        target_classes: tuple[int, ...],
+        class_mapping: ClassMapping,
+    ) -> SliceEnvStaticContext:
+        boxes = as_boxes(detection.boxes)
+        scores = np.asarray(detection.scores, dtype=np.float32).reshape(-1)
+        classes = class_mapping.map_model_classes(detection.classes)
+        if target_classes:
+            target = np.asarray(target_classes, dtype=np.int64)
+            mask = np.isin(classes.astype(np.int64), target)
+            boxes, scores, classes = boxes[mask], scores[mask], classes[mask]
+        return SliceEnvStaticContext(
+            det_boxes=boxes,
+            det_scores=scores,
+            det_classes=classes,
+            detection_map=build_detection_map(boxes, scores, detection.image_shape, state_cfg),
+            feature_state=normalize_feature(detection.feature),
+            objectness_state=np.nan_to_num(
+                np.asarray(detection.objectness_map, dtype=np.float32),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            ),
+            spatial_feature_state=np.nan_to_num(
+                np.asarray(detection.spatial_feature_map, dtype=np.float32),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            ),
+        )
 
     def _resolve_box_device(self) -> torch.device | None:
         if not bool(getattr(self.env_cfg, "use_gpu_box_ops", True)):
@@ -154,7 +201,11 @@ class SliceEnv:
         info["hard_total"] = int(len(self.hard_boxes))
         return StepResult(self._state(), reward, done, info)
 
-    def step_inference(self, action: int | Action) -> StepResult:
+    def step_inference(
+        self,
+        action: int | Action,
+        timing: dict[str, float] | None = None,
+    ) -> StepResult:
         """Advance the environment without reward-only calculations.
 
         Inference only consumes the next state, termination flags, and overlap
@@ -162,6 +213,7 @@ class SliceEnv:
         regions are absent, so skipping it avoids repeated scoring and device
         synchronization during policy rollout.
         """
+        step_start = time.perf_counter()
         action = Action(int(action))
         done = action == Action.STOP
         stalled_roi = False
@@ -198,7 +250,17 @@ class SliceEnv:
         info["roi"] = self.roi.copy()
         info["covered"] = int(self.covered.sum())
         info["hard_total"] = int(len(self.hard_boxes))
-        return StepResult(self._state(), 0.0, done, info)
+        if timing is not None:
+            timing["rollout_step_ms"] = timing.get("rollout_step_ms", 0.0) + (
+                time.perf_counter() - step_start
+            ) * 1000.0
+        state_start = time.perf_counter()
+        state = self._state()
+        if timing is not None:
+            timing["rollout_state_ms"] = timing.get("rollout_state_ms", 0.0) + (
+                time.perf_counter() - state_start
+            ) * 1000.0
+        return StepResult(state, 0.0, done, info)
 
     def valid_actions(self) -> np.ndarray:
         valid = np.ones((NUM_ACTIONS,), dtype=bool)

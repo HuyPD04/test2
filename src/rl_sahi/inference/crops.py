@@ -58,6 +58,7 @@ def run_yolo_on_crops(
     max_det: int,
     device: DeviceLike,
     timing: dict[str, float] | None = None,
+    source_image: np.ndarray | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     if len(image_paths) != len(rois):
         raise ValueError("image_paths and rois must have the same length")
@@ -70,7 +71,12 @@ def run_yolo_on_crops(
     crops: list[np.ndarray] = []
     offsets: list[tuple[int, int]] = []
     output_indices: list[int] = []
-    image_cache: dict[Path, np.ndarray] = {}
+    unique_paths = {Path(path) for path in image_paths}
+    if source_image is not None and len(unique_paths) > 1:
+        raise ValueError("source_image can only be reused when all image_paths are the same")
+    image_cache: dict[Path, np.ndarray] = (
+        {next(iter(unique_paths)): source_image} if source_image is not None and unique_paths else {}
+    )
     for index, (image_path, roi) in enumerate(zip(image_paths, rois)):
         image_path = Path(image_path)
         image = image_cache.get(image_path)

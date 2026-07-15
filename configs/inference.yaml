@@ -19,7 +19,7 @@ infer:
   save_visualization: false
   batched_inference: true
   device: "cuda"
-  policy_device: "cpu"
+  policy_device: "cuda"
   feature_layers:
     - 16
   use_cache: true

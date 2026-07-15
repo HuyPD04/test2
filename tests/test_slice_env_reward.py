@@ -276,6 +276,27 @@ class SliceEnvRewardTest(unittest.TestCase):
                 ):
                     self.assertEqual(actual.info[key], expected.info[key])
 
+    def test_static_context_matches_regular_environment_state(self) -> None:
+        detection = _high_conf_detection_cache(0)
+        cfg = EnvConfig(use_gpu_box_ops=False)
+        direct = SliceEnv(detection, None, env_cfg=cfg, target_classes=(0,))
+        static = SliceEnv.build_static_context(
+            detection,
+            direct.state_cfg,
+            (0,),
+            direct.class_mapping,
+        )
+        cached = SliceEnv(
+            detection,
+            None,
+            env_cfg=cfg,
+            target_classes=(0,),
+            static_context=static,
+        )
+
+        np.testing.assert_array_equal(cached.reset(), direct.reset())
+        np.testing.assert_array_equal(cached.valid_actions(), direct.valid_actions())
+
     def test_state_has_separate_current_attempted_and_accepted_roi_maps(self) -> None:
         base_env = SliceEnv(_detection_cache(), None, env_cfg=EnvConfig())
         base_env.reset()

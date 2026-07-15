@@ -426,6 +426,12 @@ def _predict_rl_sahi(
     state_cfg: StateConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     env_cfg = replace(env_cfg, use_gpu_box_ops=False)
+    env_static = SliceEnv.build_static_context(
+        det,
+        state_cfg,
+        cfg.target_classes,
+        cfg.class_mapping,
+    )
     full_boxes, full_scores, full_classes = _full_predictions(det, cfg)
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
@@ -453,6 +459,7 @@ def _predict_rl_sahi(
                 overlap_rois=history_arr,
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
+                static_context=env_static,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -556,6 +563,7 @@ def _predict_rl_sahi(
                 overlap_rois=overlap_arr,
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
+                static_context=env_static,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
