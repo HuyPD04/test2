@@ -10,7 +10,9 @@ infer:
   min_slice_utility: 0.8
   min_new_detection_score: 0.45
   duplicate_iou: 0.4
-  max_slice_attempts: 6
+  max_slice_attempts: 4
+  roi_prefilter_enabled: true
+  roi_prefilter_topk: 3
   crop_batch_size: 3
   max_consecutive_rejections: 2
   require_stop_for_acceptance: true
@@ -25,6 +27,7 @@ infer:
   use_cache: true
 
 benchmark:
+  output_conf: 0.01
   iou_threshold: 0.5
   fixed_slice_fraction: 0.35
   fixed_overlap: 0.2

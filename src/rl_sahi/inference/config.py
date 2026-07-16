@@ -22,6 +22,8 @@ class InferenceConfig:
     min_new_detection_score: float = 0.45
     duplicate_iou: float = 0.5
     max_slice_attempts: int = 0
+    roi_prefilter_enabled: bool = False
+    roi_prefilter_topk: int = 3
     crop_batch_size: int = 1
     max_consecutive_rejections: int = 0
     target_classes: tuple[int, ...] = (0, 2, 3, 5, 8, 9)

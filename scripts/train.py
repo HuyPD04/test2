@@ -117,6 +117,8 @@ def main() -> None:
             min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
             duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
             max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),
+            roi_prefilter_enabled=bool(infer_cfg.get("roi_prefilter_enabled", False)),
+            roi_prefilter_topk=int(infer_cfg.get("roi_prefilter_topk", 3)),
             crop_batch_size=int(infer_cfg.get("crop_batch_size", 1)),
             max_consecutive_rejections=int(infer_cfg.get("max_consecutive_rejections", 0)),
             target_classes=target_classes,
@@ -128,6 +130,7 @@ def main() -> None:
             class_mapping=class_mapping,
         ),
         bench_cfg=BenchmarkConfig(
+            output_conf=float(benchmark_cfg.get("output_conf", 0.01)),
             iou_threshold=float(benchmark_cfg.get("iou_threshold", 0.5)),
             fixed_slice_fraction=float(benchmark_cfg.get("fixed_slice_fraction", 0.35)),
             fixed_overlap=float(benchmark_cfg.get("fixed_overlap", 0.2)),

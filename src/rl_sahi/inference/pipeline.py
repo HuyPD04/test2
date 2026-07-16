@@ -36,6 +36,7 @@ from rl_sahi.inference.merge import (
     source_counts_after_merge,
 )
 from rl_sahi.inference.rollout import rollout_one_slice
+from rl_sahi.inference.roi_prefilter import score_roi_candidates, select_roi_candidates
 from rl_sahi.inference.visualize import save_inference_visual
 from rl_sahi.rl.checkpoint import load_policy
 from rl_sahi.rl.slice_env import SliceEnv
@@ -457,6 +458,7 @@ def _infer_with_loaded(
         "initial_detection_ms": float(initial_detection_ms),
         "rollout_ms": 0.0,
         "crop_inference_ms": 0.0,
+        "roi_prefilter_ms": 0.0,
         "merge_ms": 0.0,
         "write_outputs_ms": 0.0,
         "total_ms": 0.0,
@@ -494,6 +496,8 @@ def _infer_with_loaded(
     crop_batch_size = max(int(cfg.crop_batch_size), 1)
     crop_prediction_count = 0
     crop_batch_count = 0
+    roi_candidate_count = 0
+    roi_prefilter_dropped = 0
     global_stop_reason: str | None = None
 
     if cfg.batched_inference:
@@ -556,6 +560,43 @@ def _infer_with_loaded(
         timing["rollout_ms"] = timing["rollout_static_ms"] + (
             time.perf_counter() - rollout_start
         ) * 1000.0
+
+        roi_candidate_count = len(candidate_rois)
+        if cfg.roi_prefilter_enabled and candidate_rois:
+            prefilter_start = time.perf_counter()
+            candidate_scores = score_roi_candidates(
+                det,
+                [roi for _, roi, _, _ in candidate_rois],
+                state_cfg,
+                cfg.target_classes,
+                cfg.class_mapping,
+            )
+            selected_indices = set(select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk))
+            selected_candidates: list[tuple[int, np.ndarray, list[str], dict]] = []
+            for index, (cand_attempt_idx, roi, actions, info) in enumerate(candidate_rois):
+                score = float(candidate_scores[index])
+                if index in selected_indices:
+                    selected_info = dict(info)
+                    selected_info["roi_prefilter_score"] = score
+                    selected_candidates.append((cand_attempt_idx, roi, actions, selected_info))
+                    continue
+                roi_prefilter_dropped += 1
+                rejected_rois.append(roi)
+                slice_meta.append(
+                    {
+                        "attempt_index": cand_attempt_idx,
+                        "slice_index": None,
+                        "accepted": False,
+                        "rejection_reason": "roi_prefilter",
+                        "roi": [float(x) for x in roi.tolist()],
+                        "actions": actions,
+                        "steps": len(actions),
+                        "roi_prefilter_score": score,
+                        "detections": 0,
+                    }
+                )
+            candidate_rois = selected_candidates
+            timing["roi_prefilter_ms"] = (time.perf_counter() - prefilter_start) * 1000.0
 
         # Phase 2: Batch YOLO on all candidates at once
         if candidate_rois:
@@ -621,6 +662,7 @@ def _infer_with_loaded(
                         "new_detection_max_score": float(new_detection_max_score),
                         "crop_batch_size": len(candidate_rois),
                         "batched": True,
+                        "roi_prefilter_score": info.get("roi_prefilter_score"),
                     }
                 )
     else:
@@ -824,6 +866,8 @@ def _infer_with_loaded(
         "num_rejected_slices": len(rejected_rois),
         "num_crop_predictions": crop_prediction_count,
         "num_crop_batches": crop_batch_count,
+        "num_roi_candidates": roi_candidate_count,
+        "num_roi_prefilter_dropped": roi_prefilter_dropped,
         "slices": slice_meta,
         "detections": int(len(boxes)),
         "prediction_file": str(pred_path) if cfg.save_predictions else None,
@@ -906,6 +950,8 @@ def infer_one_image(
     min_new_detection_score: float | None = None,
     duplicate_iou: float | None = None,
     max_slice_attempts: int | None = None,
+    roi_prefilter_enabled: bool | None = None,
+    roi_prefilter_topk: int | None = None,
     crop_batch_size: int | None = None,
     max_consecutive_rejections: int | None = None,
     target_classes: tuple[int, ...] | list[int] | str | None = None,
@@ -958,6 +1004,14 @@ def infer_one_image(
             else float(duplicate_iou)
         ),
         max_slice_attempts=_value_or_config(infer_cfg, "max_slice_attempts", max_slice_attempts, int),
+        roi_prefilter_enabled=(
+            _bool_value(infer_cfg.get("roi_prefilter_enabled", False))
+            if roi_prefilter_enabled is None
+            else _bool_value(roi_prefilter_enabled)
+        ),
+        roi_prefilter_topk=_optional_value_or_config(
+            infer_cfg, "roi_prefilter_topk", roi_prefilter_topk, 3, int
+        ),
         crop_batch_size=_optional_value_or_config(infer_cfg, "crop_batch_size", crop_batch_size, 1, int),
         max_consecutive_rejections=_optional_value_or_config(
             infer_cfg, "max_consecutive_rejections", max_consecutive_rejections, 0, int

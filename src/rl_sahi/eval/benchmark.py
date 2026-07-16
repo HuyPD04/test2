@@ -29,6 +29,7 @@ from rl_sahi.inference.pipeline import (
     get_initial_detection,
 )
 from rl_sahi.inference.rollout import rollout_one_slice
+from rl_sahi.inference.roi_prefilter import score_roi_candidates, select_roi_candidates
 from rl_sahi.rl.checkpoint import load_policy
 from rl_sahi.rl.slice_env import SliceEnv
 from rl_sahi.rl.state_config import StateConfig
@@ -36,6 +37,7 @@ from rl_sahi.rl.state_config import StateConfig
 
 @dataclass(slots=True)
 class BenchmarkConfig:
+    output_conf: float = 0.01
     iou_threshold: float = 0.5
     fixed_slice_fraction: float = 0.35
     fixed_overlap: float = 0.2
@@ -472,6 +474,16 @@ def _predict_rl_sahi(
             attempt_idx += 1
 
         if candidate_rois:
+            if cfg.roi_prefilter_enabled:
+                candidate_scores = score_roi_candidates(
+                    det,
+                    candidate_rois,
+                    state_cfg,
+                    cfg.target_classes,
+                    cfg.class_mapping,
+                )
+                selected = select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk)
+                candidate_rois = [candidate_rois[index] for index in selected]
             predictions = run_yolo_on_crops(
                 model,
                 [image_path] * len(candidate_rois),
@@ -859,6 +871,7 @@ def evaluate_rl_sahi_policy(
 
     infer_cfg = replace(
         infer_cfg,
+        output_conf=bench_cfg.output_conf,
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
@@ -949,6 +962,7 @@ def benchmark_split(
     limit: int | None = None,
     use_cache: bool = True,
 ) -> list[dict[str, float | str]]:
+    inference_config = asdict(infer_cfg)
     images = select_benchmark_images(
         iter_images(image_root, split=split),
         limit,
@@ -960,6 +974,7 @@ def benchmark_split(
 
     infer_cfg = replace(
         infer_cfg,
+        output_conf=bench_cfg.output_conf,
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
@@ -1263,7 +1278,8 @@ def benchmark_split(
         "images": [image.name for image in images],
         "warmup_images": warmup_images,
         "timed_images": timed_images,
-        "inference_config": asdict(infer_cfg),
+        "inference_config": inference_config,
+        "effective_benchmark_inference_config": asdict(infer_cfg),
         "benchmark_config": asdict(bench_cfg),
     }
     (out_dir / "benchmark.json").write_text(

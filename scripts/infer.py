@@ -82,6 +82,8 @@ def main() -> None:
             min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
             duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
             max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),
+            roi_prefilter_enabled=_bool_value(infer_cfg.get("roi_prefilter_enabled", False)),
+            roi_prefilter_topk=int(infer_cfg.get("roi_prefilter_topk", 3)),
             crop_batch_size=int(infer_cfg.get("crop_batch_size", 1)),
             max_consecutive_rejections=int(infer_cfg.get("max_consecutive_rejections", 0)),
             target_classes=target_classes,
@@ -107,6 +109,8 @@ def main() -> None:
         print(
             f"[infer] {image_path.name}: {meta['detections']} boxes, "
             f"slices={meta['num_slices']} attempts={meta['num_attempts']} "
+            f"candidates={meta.get('num_roi_candidates', 0)} "
+            f"prefiltered={meta.get('num_roi_prefilter_dropped', 0)} "
             f"crops={meta['num_crop_predictions']}/{meta['num_crop_batches']} "
             f"time={total_ms:.1f}ms crop={crop_ms:.1f}ms"
         )
@@ -136,6 +140,7 @@ def main() -> None:
             f"valid={float(timing.get('rollout_valid_ms', 0.0)):.1f} "
             f"policy={float(timing.get('rollout_policy_ms', 0.0)):.1f} "
             f"step={float(timing.get('rollout_step_ms', 0.0)):.1f}) "
+            f"prefilter={float(timing.get('roi_prefilter_ms', 0.0)):.1f}ms "
             f"merge={float(timing.get('merge_ms', 0.0)):.1f}ms "
             f"write={float(timing.get('write_outputs_ms', 0.0)):.1f}ms"
         )
