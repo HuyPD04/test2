@@ -83,7 +83,7 @@ train:
   optimize_every: 1
   preload_cache: true
   seed: 42
-  allow_sequence_overlap: false
+  allow_sequence_overlap: true
   log_interval: 25
   val_split: val
   eval_interval: 500
