@@ -176,22 +176,25 @@ class SliceEnv:
         reward, info = self._reward(action, previous_roi)
         if stalled_roi:
             done = True
-            reward = min(reward, -1e-6) - self.env_cfg.stalled_without_stop_penalty
+            if self.env_cfg.use_cost_overlap_reward:
+                reward = min(reward, -1e-6) - self.env_cfg.stalled_without_stop_penalty
         if info["old_slice_overlap"] >= self.env_cfg.old_slice_overlap_threshold:
             done = True
             info["stop_due_to_old_overlap"] = True
-            reward = min(reward, -1e-6) - self.env_cfg.constraint_weight
+            if self.env_cfg.use_cost_overlap_reward:
+                reward = min(reward, -1e-6) - self.env_cfg.constraint_weight
         else:
             info["stop_due_to_old_overlap"] = False
         if action == Action.STOP and info["attempted_slice_overlap"] >= self.env_cfg.old_slice_overlap_threshold:
             info["stop_due_to_attempted_overlap"] = True
-            reward = min(reward, -1e-6) - self.env_cfg.attempted_overlap_penalty
+            if self.env_cfg.use_cost_overlap_reward:
+                reward = min(reward, -1e-6) - self.env_cfg.attempted_overlap_penalty
         else:
             info["stop_due_to_attempted_overlap"] = False
         if self.step_index >= self.env_cfg.max_steps:
             done = True
             info["stop_due_to_max_steps"] = action != Action.STOP
-            if info["stop_due_to_max_steps"]:
+            if info["stop_due_to_max_steps"] and self.env_cfg.use_cost_overlap_reward:
                 reward = min(reward, -1e-6) - self.env_cfg.max_steps_without_stop_penalty
         else:
             info["stop_due_to_max_steps"] = False
@@ -283,6 +286,16 @@ class SliceEnv:
             overlap >= self.env_cfg.old_slice_overlap_threshold and non_stop_valid
         )
         return valid
+
+    def policy_action_mask(self) -> np.ndarray:
+        """Return the mask used by the policy and Bellman target.
+
+        Environment geometry is still clipped and terminal constraints still
+        apply when masking is disabled; this switch only ablates action masking.
+        """
+        if not self.env_cfg.use_action_mask:
+            return np.ones((NUM_ACTIONS,), dtype=bool)
+        return self.valid_actions()
 
     def _valid_actions_legacy(self) -> np.ndarray:
         valid = np.ones((NUM_ACTIONS,), dtype=bool)
@@ -817,15 +830,42 @@ class SliceEnv:
             previous_slice_count=len(self.previous_rois),
             cfg=self.state_cfg,
         )
+        if not self.state_cfg.use_detector_cues:
+            summary = summary.copy()
+            summary[0:12] = 0.0
+            summary[24:28] = 0.0
+        if not self.state_cfg.use_history:
+            summary = summary.copy()
+            summary[[18, 20, 21, 23]] = 0.0
+
+        zeros_grid = np.zeros((self.state_cfg.grid_size, self.state_cfg.grid_size), dtype=np.float32)
+        history = self.history if self.state_cfg.use_history else zeros_grid
+        attempted_slice_map = self.attempted_slice_map if self.state_cfg.use_history else zeros_grid
+        accepted_slice_map = self.accepted_slice_map if self.state_cfg.use_history else zeros_grid
+        detection_map = (
+            self.detection_map
+            if self.state_cfg.use_detector_cues
+            else np.zeros_like(self.detection_map, dtype=np.float32)
+        )
+        objectness_state = (
+            self.objectness_state
+            if self.state_cfg.use_detector_cues
+            else np.zeros_like(self.objectness_state, dtype=np.float32)
+        )
+        spatial_feature_state = (
+            self.spatial_feature_state
+            if self.state_cfg.use_spatial_features
+            else np.zeros_like(self.spatial_feature_state, dtype=np.float32)
+        )
         return build_state_vector(
             self.feature_state,
-            self.history,
+            history,
             self._current_roi_map(),
-            self.attempted_slice_map,
-            self.accepted_slice_map,
-            self.detection_map,
-            self.objectness_state,
-            self.spatial_feature_state,
+            attempted_slice_map,
+            accepted_slice_map,
+            detection_map,
+            objectness_state,
+            spatial_feature_state,
             summary,
             static_ready=True,
         )
@@ -899,25 +939,30 @@ class SliceEnv:
             density = target_score * cfg.max_roi_area_ratio / max(roi_area_ratio, 1e-6)
             reward += cfg.target_reward * 0.3 * float(np.clip(density, 0.0, 3.0))
 
-        step_cost = 0.05 + roi_area_ratio * 0.5
-        reward -= cfg.efficiency_weight * step_cost
+        if cfg.use_cost_overlap_reward:
+            step_cost = 0.05 + roi_area_ratio * 0.5
+            reward -= cfg.efficiency_weight * step_cost
 
-        constraint_penalty = 0.0
-        if roi_area_ratio > cfg.max_roi_area_ratio:
-            overflow = roi_area_ratio / max(cfg.max_roi_area_ratio, 1e-6) - 1.0
-            constraint_penalty += overflow
-        if scale_gain < cfg.min_scale_gain:
-            under = cfg.min_scale_gain / max(scale_gain, 1e-6) - 1.0
-            constraint_penalty += under
-        if old_slice_overlap >= cfg.old_slice_overlap_threshold:
-            constraint_penalty += 1.0
-        if attempted_slice_overlap >= cfg.old_slice_overlap_threshold:
-            constraint_penalty += cfg.attempted_overlap_penalty / max(cfg.constraint_weight, 1e-6)
-        reward -= cfg.constraint_weight * constraint_penalty
-        reward -= cfg.detected_overlap_penalty * detected_overlap
+            constraint_penalty = 0.0
+            if roi_area_ratio > cfg.max_roi_area_ratio:
+                overflow = roi_area_ratio / max(cfg.max_roi_area_ratio, 1e-6) - 1.0
+                constraint_penalty += overflow
+            if scale_gain < cfg.min_scale_gain:
+                under = cfg.min_scale_gain / max(scale_gain, 1e-6) - 1.0
+                constraint_penalty += under
+            if old_slice_overlap >= cfg.old_slice_overlap_threshold:
+                constraint_penalty += 1.0
+            if attempted_slice_overlap >= cfg.old_slice_overlap_threshold:
+                constraint_penalty += cfg.attempted_overlap_penalty / max(cfg.constraint_weight, 1e-6)
+            reward -= cfg.constraint_weight * constraint_penalty
+            reward -= cfg.detected_overlap_penalty * detected_overlap
 
         if action == Action.STOP:
-            if total_target_score > 0.0 and old_slice_overlap < cfg.old_slice_overlap_threshold:
+            overlap_allows_bonus = (
+                not cfg.use_cost_overlap_reward
+                or old_slice_overlap < cfg.old_slice_overlap_threshold
+            )
+            if total_target_score > 0.0 and overlap_allows_bonus:
                 quality = min(total_target_score, 4.0)
                 reward += cfg.stop_bonus_weight * quality
             elif observable_score > 0.3:
@@ -964,7 +1009,7 @@ class SliceEnv:
         old_slice_overlap = self._old_slice_overlap()
         attempted_slice_overlap = self._attempted_slice_overlap()
 
-        reward = -self.env_cfg.step_penalty
+        reward = -self.env_cfg.step_penalty if self.env_cfg.use_cost_overlap_reward else 0.0
         info = {
             "new_hits": new_hits,
             "candidate_hits": candidate_hits,
@@ -1000,24 +1045,29 @@ class SliceEnv:
         if self.env_cfg.observable_target_reward > 0.0:
             reward += self.env_cfg.observable_target_reward * float(np.clip(observable_delta, -2.0, 2.0))
 
-        detected_overlap = self._detected_overlap_score()
-        if detected_overlap > 0.0:
-            reward -= self.env_cfg.detected_overlap_penalty * detected_overlap
-            info["detected_overlap"] = detected_overlap
+        if self.env_cfg.use_cost_overlap_reward:
+            detected_overlap = self._detected_overlap_score()
+            if detected_overlap > 0.0:
+                reward -= self.env_cfg.detected_overlap_penalty * detected_overlap
+                info["detected_overlap"] = detected_overlap
 
-        reward -= self.env_cfg.area_penalty * roi_area_ratio
-        if roi_area_ratio > self.env_cfg.max_roi_area_ratio:
-            overflow = roi_area_ratio / max(self.env_cfg.max_roi_area_ratio, 1e-6) - 1.0
-            reward -= self.env_cfg.large_roi_penalty * overflow
-        if scale_gain < self.env_cfg.min_scale_gain:
-            under_scale = self.env_cfg.min_scale_gain / max(scale_gain, 1e-6) - 1.0
-            reward -= self.env_cfg.low_scale_penalty * under_scale
-        if old_slice_overlap >= self.env_cfg.old_slice_overlap_threshold:
-            overflow = old_slice_overlap / max(self.env_cfg.old_slice_overlap_threshold, 1e-6) - 1.0
-            reward -= self.env_cfg.old_slice_overlap_penalty * (1.0 + overflow)
+            reward -= self.env_cfg.area_penalty * roi_area_ratio
+            if roi_area_ratio > self.env_cfg.max_roi_area_ratio:
+                overflow = roi_area_ratio / max(self.env_cfg.max_roi_area_ratio, 1e-6) - 1.0
+                reward -= self.env_cfg.large_roi_penalty * overflow
+            if scale_gain < self.env_cfg.min_scale_gain:
+                under_scale = self.env_cfg.min_scale_gain / max(scale_gain, 1e-6) - 1.0
+                reward -= self.env_cfg.low_scale_penalty * under_scale
+            if old_slice_overlap >= self.env_cfg.old_slice_overlap_threshold:
+                overflow = old_slice_overlap / max(self.env_cfg.old_slice_overlap_threshold, 1e-6) - 1.0
+                reward -= self.env_cfg.old_slice_overlap_penalty * (1.0 + overflow)
 
         if action == Action.STOP:
-            if total_target_score > 0.0 and old_slice_overlap < self.env_cfg.old_slice_overlap_threshold:
+            overlap_allows_bonus = (
+                not self.env_cfg.use_cost_overlap_reward
+                or old_slice_overlap < self.env_cfg.old_slice_overlap_threshold
+            )
+            if total_target_score > 0.0 and overlap_allows_bonus:
                 stop_quality = min(total_target_score, 4.0)
                 stop_quality += min(total_target_score / max(hit_count, 1), 1.0)
                 reward += self.env_cfg.stop_target_reward * stop_quality

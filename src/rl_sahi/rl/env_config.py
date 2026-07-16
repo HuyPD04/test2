@@ -49,6 +49,8 @@ class EnvConfig:
     large_roi_penalty: float = 2.0
     low_scale_penalty: float = 1.0
     old_slice_overlap_penalty: float = 3.0
+    use_cost_overlap_reward: bool = True
+    use_action_mask: bool = True
 
 
 @dataclass(slots=True)

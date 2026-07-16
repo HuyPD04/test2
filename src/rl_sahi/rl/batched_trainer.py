@@ -287,6 +287,43 @@ def batched_train_dqn(
                 f"Resume checkpoint state_dim={resume_data.get('state_dim')} does not match current state_dim={state_dim}. "
                 f"Delete {resume_path} or run with --no-resume."
             )
+        component_values = {
+            "state.use_spatial_features": (
+                resume_data.get("state_cfg", {}).get("use_spatial_features", True),
+                state_cfg.use_spatial_features,
+            ),
+            "state.use_detector_cues": (
+                resume_data.get("state_cfg", {}).get("use_detector_cues", True),
+                state_cfg.use_detector_cues,
+            ),
+            "state.use_history": (
+                resume_data.get("state_cfg", {}).get("use_history", True),
+                state_cfg.use_history,
+            ),
+            "train.use_crop_outcome_reward": (
+                resume_data.get("train_cfg", {}).get("use_crop_outcome_reward", True),
+                cfg.use_crop_outcome_reward,
+            ),
+            "env.use_cost_overlap_reward": (
+                resume_data.get("env_cfg", {}).get("use_cost_overlap_reward", True),
+                env_cfg.use_cost_overlap_reward,
+            ),
+            "env.use_action_mask": (
+                resume_data.get("env_cfg", {}).get("use_action_mask", True),
+                env_cfg.use_action_mask,
+            ),
+        }
+        mismatches = [
+            f"{name}: checkpoint={bool(saved)}, current={bool(current)}"
+            for name, (saved, current) in component_values.items()
+            if bool(saved) != bool(current)
+        ]
+        if mismatches:
+            raise ValueError(
+                "Resume checkpoint uses a different ablation configuration ("
+                + "; ".join(mismatches)
+                + "). Use a distinct --out-dir and --no-resume."
+            )
         resume_actions = resume_data.get("actions")
         if isinstance(resume_actions, dict) and len(resume_actions) != len(ACTION_NAMES):
             raise RuntimeError(
@@ -406,7 +443,7 @@ def batched_train_dqn(
 
         while active_workers:
             states = [w.state for w in active_workers]
-            valid_masks = [w.env.valid_actions() for w in active_workers]
+            valid_masks = [w.env.policy_action_mask() for w in active_workers]
             epsilons = [epsilon_by_step(global_step, cfg)] * len(active_workers)
             guide_probs = [guide_prob_by_step(global_step, cfg)] * len(active_workers)
             
@@ -494,7 +531,7 @@ def batched_train_dqn(
                     w.crop_tp_gain_total += int(terminal_outcome.tp_gain)
                     w.crop_fp_gain_total += int(terminal_outcome.fp_gain)
                     w.crop_outcome_reward_total += float(terminal_outcome.reward)
-                next_valid_actions = w.env.valid_actions().copy()
+                next_valid_actions = w.env.policy_action_mask().copy()
 
                 w.n_step_buffer.append((w.state, action, result.reward, result.state, result.done, next_valid_actions))
                 if len(w.n_step_buffer) >= getattr(cfg, "n_step", 1):

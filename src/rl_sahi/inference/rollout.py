@@ -32,7 +32,7 @@ def rollout_one_slice(
     info: dict = {}
     for _ in range(env.env_cfg.max_steps + 1):
         valid_start = time.perf_counter()
-        valid_np = env.valid_actions()
+        valid_np = env.policy_action_mask()
         if timing is not None:
             timing["rollout_valid_ms"] = timing.get("rollout_valid_ms", 0.0) + (
                 time.perf_counter() - valid_start

@@ -1,0 +1,15 @@
+includes:
+  - ../benchmark_thesis.yaml
+
+# Ablation C: additionally require a policy STOP transition before accepting
+# a crop. This isolates the terminal/STOP gate, not the regular utility gate.
+infer:
+  roi_prefilter_enabled: true
+  roi_prefilter_topk: 3
+  require_stop_for_acceptance: true
+
+benchmark:
+  budgeted_crop_counts: []
+  include_fixed_grid_full: false
+  include_gated_variants: false
+  proposal_crop_count: 0

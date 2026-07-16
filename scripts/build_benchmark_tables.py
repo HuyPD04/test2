@@ -66,7 +66,11 @@ def _local_accuracy_row(label: str, row: dict[str, Any] | None) -> str:
     )
 
 
-def build(test_data: dict[str, Any] | None, val_data: dict[str, Any] | None) -> str:
+def build(
+    test_data: dict[str, Any] | None,
+    val_data: dict[str, Any] | None,
+    ablation_markdown: str | None = None,
+) -> str:
     test = _rows(test_data)
     val = _rows(val_data)
     lines = [
@@ -174,6 +178,12 @@ def build(test_data: dict[str, Any] | None, val_data: dict[str, Any] | None) -> 
             f"{_pct(proposed_val.get(f'AP50_class_{class_id}'))} |"
         )
 
+    if ablation_markdown:
+        ablation_lines = ablation_markdown.strip().splitlines()
+        if ablation_lines and ablation_lines[0].startswith("# "):
+            ablation_lines[0] = "## " + ablation_lines[0][2:]
+        lines.extend(["", *ablation_lines])
+
     lines.extend(
         [
             "",
@@ -200,10 +210,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build thesis-ready Markdown benchmark tables.")
     parser.add_argument("--test-json", type=Path)
     parser.add_argument("--val-json", type=Path)
+    parser.add_argument("--ablation-table", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(build(_load(args.test_json), _load(args.val_json)), encoding="utf-8")
+    ablation_markdown = None
+    if args.ablation_table is not None and args.ablation_table.exists():
+        ablation_markdown = args.ablation_table.read_text(encoding="utf-8")
+    args.output.write_text(
+        build(_load(args.test_json), _load(args.val_json), ablation_markdown),
+        encoding="utf-8",
+    )
     print(f"[tables] wrote {args.output}")
 
 

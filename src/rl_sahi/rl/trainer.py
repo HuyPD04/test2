@@ -103,7 +103,7 @@ def select_action(
     env: SliceEnv,
     device: torch.device,
 ) -> Action:
-    valid_actions = np.flatnonzero(env.valid_actions())
+    valid_actions = np.flatnonzero(env.policy_action_mask())
     if len(valid_actions) == 0:
         valid_actions = np.asarray([int(Action.STOP)], dtype=np.int64)
     if random.random() < guide_prob:
@@ -115,7 +115,7 @@ def select_action(
     with torch.no_grad():
         x = torch.from_numpy(state).float().unsqueeze(0).to(device)
         q = policy(x)
-        valid = torch.from_numpy(env.valid_actions()).bool().to(device)
+        valid = torch.from_numpy(env.policy_action_mask()).bool().to(device)
         q[:, ~valid] = -torch.inf
         return Action(int(q.argmax(dim=1).item()))
 
@@ -293,7 +293,7 @@ def _greedy_eval_episode(
         for _ in range(env_cfg.max_steps + 1):
             with torch.no_grad():
                 q = policy(torch.from_numpy(state).float().unsqueeze(0).to(device))
-                valid = torch.from_numpy(env.valid_actions()).bool().to(device)
+                valid = torch.from_numpy(env.policy_action_mask()).bool().to(device)
                 q[:, ~valid] = -torch.inf
                 action = Action(int(q.argmax(dim=1).item()))
             result = env.step(action)
@@ -710,7 +710,7 @@ def train_dqn(
                             crop_tp_gain_total += int(terminal_outcome.tp_gain)
                             crop_fp_gain_total += int(terminal_outcome.fp_gain)
                             crop_outcome_reward_total += float(terminal_outcome.reward)
-                    next_valid_actions = env.valid_actions().copy()
+                    next_valid_actions = env.policy_action_mask().copy()
 
                     n_step_buffer.append((state, action, result.reward, result.state, result.done, next_valid_actions))
                     if len(n_step_buffer) >= cfg.n_step:

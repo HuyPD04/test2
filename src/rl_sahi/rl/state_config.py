@@ -20,6 +20,9 @@ class StateConfig:
     roi_count_norm: float = 50.0
     slice_count_norm: float = 10.0
     spatial_feature_channels: int = 4
+    use_spatial_features: bool = True
+    use_detector_cues: bool = True
+    use_history: bool = True
 
 
 @dataclass(slots=True)

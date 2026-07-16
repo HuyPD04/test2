@@ -14,7 +14,7 @@ from rl_sahi.common.cache import DetectionCache, HardRegionCache
 from rl_sahi.rl.env_config import EnvConfig
 from rl_sahi.rl.crop_outcome import CropOutcome
 from rl_sahi.rl.slice_env import SliceEnv
-from rl_sahi.rl.state_config import BASE_MAP_CHANNELS
+from rl_sahi.rl.state_config import BASE_MAP_CHANNELS, StateConfig
 from rl_sahi.rl.trainer import TrainConfig, _terminal_reward_with_crop_outcome
 
 
@@ -59,6 +59,20 @@ def _high_conf_detection_cache(cls: float) -> DetectionCache:
     )
 
 
+def _nonzero_state_detection_cache() -> DetectionCache:
+    return DetectionCache(
+        image_path="synthetic.jpg",
+        image_shape=(100, 100),
+        boxes=np.array([[40.0, 40.0, 60.0, 60.0]], dtype=np.float32),
+        scores=np.array([0.9], dtype=np.float32),
+        classes=np.array([0.0], dtype=np.float32),
+        feature=np.ones((4,), dtype=np.float32),
+        feature_layers=(10,),
+        objectness_map=np.ones((1, 16, 16), dtype=np.float32),
+        spatial_feature_map=np.ones((4, 16, 16), dtype=np.float32),
+    )
+
+
 class SliceEnvRewardTest(unittest.TestCase):
     def make_env(self) -> SliceEnv:
         return SliceEnv(_detection_cache(), _hard_region_cache(), env_cfg=EnvConfig())
@@ -73,6 +87,63 @@ class SliceEnvRewardTest(unittest.TestCase):
         self.assertEqual(result.info["candidate_hits"], 1)
         self.assertEqual(int(env.covered.sum()), 0)
         self.assertLess(result.reward, 0.0)
+
+    def test_component_switches_zero_only_ablation_state_groups(self) -> None:
+        cfg = StateConfig(
+            use_spatial_features=False,
+            use_detector_cues=False,
+            use_history=False,
+        )
+        env = SliceEnv(_nonzero_state_detection_cache(), None, state_cfg=cfg)
+        state = env.reset()
+        grid = cfg.grid_size * cfg.grid_size
+        offset = 4
+        history = state[offset : offset + grid]
+        current_roi = state[offset + grid : offset + 2 * grid]
+        attempted = state[offset + 2 * grid : offset + 3 * grid]
+        accepted = state[offset + 3 * grid : offset + 4 * grid]
+        detection = state[offset + 4 * grid : offset + 8 * grid]
+        objectness = state[offset + 8 * grid : offset + 9 * grid]
+        spatial = state[offset + 9 * grid : offset + 13 * grid]
+        summary = state[-28:]
+
+        self.assertTrue(np.all(history == 0.0))
+        self.assertGreater(float(current_roi.sum()), 0.0)
+        self.assertTrue(np.all(attempted == 0.0))
+        self.assertTrue(np.all(accepted == 0.0))
+        self.assertTrue(np.all(detection == 0.0))
+        self.assertTrue(np.all(objectness == 0.0))
+        self.assertTrue(np.all(spatial == 0.0))
+        self.assertTrue(np.all(summary[0:12] == 0.0))
+        self.assertTrue(np.all(summary[24:28] == 0.0))
+        self.assertTrue(np.all(summary[[18, 20, 21, 23]] == 0.0))
+
+    def test_no_cost_overlap_disables_step_cost_reward(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            None,
+            env_cfg=EnvConfig(use_cost_overlap_reward=False),
+        )
+        env.reset()
+
+        result = env.step(Action.RIGHT)
+
+        self.assertEqual(result.reward, 0.0)
+
+    def test_no_action_mask_exposes_every_action_to_policy(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            None,
+            env_cfg=EnvConfig(
+                initial_slice_fraction=0.35,
+                min_slice_fraction=0.35,
+                use_action_mask=False,
+            ),
+        )
+        env.reset()
+
+        self.assertFalse(bool(env.valid_actions()[int(Action.ZOOM_IN)]))
+        self.assertTrue(bool(env.policy_action_mask().all()))
 
     def test_stop_commits_target_hit(self) -> None:
         env = self.make_env()

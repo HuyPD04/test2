@@ -9,6 +9,9 @@ state:
   roi_count_norm: 50.0
   slice_count_norm: 10.0
   spatial_feature_channels: 4
+  use_spatial_features: true
+  use_detector_cues: true
+  use_history: true
 
 env:
   max_steps: 7
@@ -53,6 +56,8 @@ env:
   large_roi_penalty: 2.0
   low_scale_penalty: 1.0
   old_slice_overlap_penalty: 3.0
+  use_cost_overlap_reward: true
+  use_action_mask: true
 
 train:
   episodes: 20000

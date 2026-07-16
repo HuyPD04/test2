@@ -11,8 +11,8 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | ASAHI (12 slices) | ASAHI paper | 29.3 | 41.9 | 22.8 | 2.98 |
 | ASAHI (15 slices) | ASAHI paper | 27.2 | 40.9 | 21.3 | 2.39 |
 | ASAHI (adaptive) | ASAHI paper | 30.4 | 45.6 | 25.2 | 4.88 |
-| YOLO11s only | local | 16.32 | 28.41 | 16.65 | 27.99 |
-| RL-SAHI (proposed) | local | 16.64 | 29.46 | 16.74 | 5.78 |
+| YOLO11s only | local | 16.62 | 28.70 | 16.97 | 24.36 |
+| RL-SAHI (proposed) | local | 19.35 | 34.45 | 19.13 | 4.51 |
 
 > ASAHI paper values are reference-only: its TPH-YOLOv5 detector and hardware differ from the local YOLO11s pipeline, so the speed values are not controlled hardware comparisons.
 
@@ -25,44 +25,57 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | QueryDet (RetinaNet-50, CSQ) | 28.32 | 48.14 | 28.75 | CVPR 2022 |
 | AD-Det* (ResNeXt-101) | 37.50 | 60.90 | 39.20 | Remote Sensing 2025 |
 | TPH+ASAHI | 36.00 | 56.80 | 28.20 | arXiv:2604.19233 |
-| RL-SAHI (proposed, YOLO11s) | 20.86 | 36.25 | 20.50 | local run |
+| RL-SAHI (proposed, YOLO11s) | 25.47 | 43.49 | 25.41 | local run |
 
 ## Internal detection diagnostics - local test run
 
 | Method | Precision@0.50 | Recall@0.50 | Recall-small@0.50 | FP/image |
 |---|---:|---:|---:|---:|
-| YOLO11s only | 14.83 | 55.50 | 34.09 | 148.63 |
-| SAHI budget 4 | 9.11 | 67.36 | 55.16 | 313.41 |
-| SAHI budget 6 | 7.93 | 69.25 | 58.00 | 374.83 |
-| SAHI budget 12 | 6.16 | 71.61 | 61.00 | 508.53 |
-| SAHI budget 15 | 5.71 | 71.98 | 61.41 | 554.43 |
-| RL-SAHI | 13.56 | 59.82 | 43.12 | 177.95 |
+| YOLO11s only | 14.90 | 54.37 | 31.62 | 144.84 |
+| SAHI budget 4 | 15.02 | 69.49 | 56.62 | 183.36 |
+| SAHI budget 6 | 14.12 | 71.69 | 59.64 | 203.33 |
+| SAHI budget 12 | 12.56 | 74.43 | 62.90 | 241.75 |
+| SAHI budget 15 | 12.16 | 74.90 | 63.36 | 252.46 |
+| RL-SAHI | 15.59 | 63.69 | 48.31 | 160.84 |
 
 ## Internal efficiency - local test run
 
 | Method | Latency (ms/image) | Speed (img/s) | Slices/image | Detector calls/image | Effective GFLOPs |
 |---|---:|---:|---:|---:|---:|
-| YOLO11s only | 35.7 | 27.99 | 0.00 | 1.00 | 21.5 |
-| SAHI budget 4 | 91.8 | 10.90 | 4.00 | 5.00 | 107.5 |
-| SAHI budget 6 | 111.5 | 8.97 | 6.00 | 7.00 | 150.5 |
-| SAHI budget 12 | 184.4 | 5.42 | 12.00 | 13.00 | 279.5 |
-| SAHI budget 15 | 220.8 | 4.53 | 15.00 | 16.00 | 344.0 |
-| RL-SAHI | 173.0 | 5.78 | 2.47 | 3.47 | 74.6 |
+| YOLO11s only | 41.1 | 24.36 | 0.00 | 1.00 | 21.5 |
+| SAHI budget 4 | 99.4 | 10.06 | 4.00 | 5.00 | 107.5 |
+| SAHI budget 6 | 121.7 | 8.22 | 6.00 | 7.00 | 150.5 |
+| SAHI budget 12 | 201.2 | 4.97 | 12.00 | 13.00 | 279.5 |
+| SAHI budget 15 | 244.1 | 4.10 | 15.00 | 16.00 | 344.0 |
+| RL-SAHI | 221.6 | 4.51 | 3.00 | 4.00 | 86.0 |
 
 ## Per-class AP - proposed method
 
 | Class | Test AP | Test AP50 | Val AP | Val AP50 |
 |---|---:|---:|---:|---:|
-| 0: pedestrian | 10.90 | 28.65 | 18.43 | 43.09 |
-| 1: people | 3.99 | 12.78 | 10.14 | 28.69 |
-| 2: bicycle | 2.67 | 6.71 | 4.68 | 11.53 |
-| 3: car | 44.18 | 72.44 | 54.35 | 80.63 |
-| 4: van | 18.98 | 28.02 | 25.64 | 36.07 |
-| 5: truck | 22.03 | 34.53 | 20.95 | 31.69 |
-| 6: tricycle | 9.24 | 17.41 | 12.76 | 23.81 |
-| 7: awning-tricycle | 6.86 | 12.24 | 6.14 | 9.78 |
-| 8: bus | 35.93 | 51.55 | 37.60 | 53.69 |
-| 9: motor | 11.61 | 30.26 | 17.88 | 43.54 |
+| 0: pedestrian | 14.10 | 35.00 | 23.84 | 52.48 |
+| 1: people | 6.26 | 18.79 | 14.58 | 38.41 |
+| 2: bicycle | 5.02 | 11.59 | 6.74 | 16.27 |
+| 3: car | 45.58 | 74.78 | 57.00 | 83.57 |
+| 4: van | 21.23 | 31.56 | 30.92 | 43.49 |
+| 5: truck | 25.56 | 40.82 | 27.02 | 40.10 |
+| 6: tricycle | 12.04 | 22.63 | 16.22 | 29.82 |
+| 7: awning-tricycle | 10.74 | 18.55 | 9.59 | 15.28 |
+| 8: bus | 38.53 | 54.86 | 46.22 | 64.15 |
+| 9: motor | 14.46 | 35.95 | 22.53 | 51.33 |
+
+## RL-SAHI ablation - VisDrone2019-DET val
+
+All variants use the same detector, DQN checkpoint, validation images, confidence thresholds, merge settings, and evaluator. The STOP gate is `require_stop_for_acceptance`; regular crop utility checks remain enabled in every RL variant.
+
+Execution device for the reported speed values: `cpu`. Accuracy metrics are comparable across these rows; do not compare this speed column with T4 paper results.
+
+| Configuration | ROI pre-filter | STOP gate | AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| YOLO11s full-image | No | No | 20.91 | 35.03 | 21.22 | 40.50 | 190.59 | 0.00 | 8.82 |
+| RL slicing | No | No | 25.81 | 44.19 | 25.69 | 68.07 | 253.68 | 4.00 | 1.38 |
+| RL slicing + ROI pre-filter | Yes | No | 25.47 | 43.49 | 25.41 | 65.89 | 238.09 | 3.00 | 1.71 |
+| RL slicing + ROI pre-filter + STOP gate | Yes | Yes | 25.46 | 43.45 | 25.40 | 65.78 | 236.85 | 2.94 | 1.62 |
 
 ## Protocol and provenance notes
 

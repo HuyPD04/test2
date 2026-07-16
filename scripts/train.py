@@ -26,13 +26,68 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Checkpoint/log directory; use a distinct directory for each ablation variant.",
+    )
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument(
+        "--spatial-feature",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable YOLO spatial feature maps in the DQN state (default: config, enabled).",
+    )
+    parser.add_argument(
+        "--detector-cues",
+        "--detection-map",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable detection maps, objectness map, and detection summaries in the DQN state (default: config, enabled).",
+    )
+    parser.add_argument(
+        "--history",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable visited/attempted/accepted ROI memory in the DQN state (default: config, enabled).",
+    )
+    parser.add_argument(
+        "--outcome-reward",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable terminal reward from actual crop detector outcomes (default: config, enabled).",
+    )
+    parser.add_argument(
+        "--cost-overlap",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable compute, scale, and overlap reward penalties (default: config, enabled).",
+    )
+    parser.add_argument(
+        "--action-mask",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Mask stalled/redundant actions in exploration, policy, and Bellman targets (default: config, enabled).",
+    )
     args = parser.parse_args()
 
     cfg = load_default_config(args.config, ROOT)
     train_cfg = cfg.dataclass_instance("train", TrainConfig)
     env_cfg = cfg.dataclass_instance("env", EnvConfig)
     state_cfg = cfg.dataclass_instance("state", StateConfig)
+    if args.spatial_feature is not None:
+        state_cfg.use_spatial_features = bool(args.spatial_feature)
+    if args.detector_cues is not None:
+        state_cfg.use_detector_cues = bool(args.detector_cues)
+    if args.history is not None:
+        state_cfg.use_history = bool(args.history)
+    if args.outcome_reward is not None:
+        train_cfg.use_crop_outcome_reward = bool(args.outcome_reward)
+    if args.cost_overlap is not None:
+        env_cfg.use_cost_overlap_reward = bool(args.cost_overlap)
+    if args.action_mask is not None:
+        env_cfg.use_action_mask = bool(args.action_mask)
     detect_cfg = cfg.section("detect")
     hard_cfg = cfg.section("hard_region")
     infer_cfg = cfg.section("infer")
@@ -62,6 +117,15 @@ def main() -> None:
         train_cfg.resume = bool(args.resume)
     device_name = args.device or cfg.optional_str("train", "device")
     print_device_info("train", device_name)
+    print(
+        "[train] components: "
+        f"spatial_feature={state_cfg.use_spatial_features} "
+        f"detector_cues={state_cfg.use_detector_cues} "
+        f"history={state_cfg.use_history} "
+        f"outcome_reward={train_cfg.use_crop_outcome_reward} "
+        f"cost_overlap={env_cfg.use_cost_overlap_reward} "
+        f"action_mask={env_cfg.use_action_mask}"
+    )
     detection_metadata = detection_cache_metadata(
         weights=cfg.path_value("weights"),
         imgsz=int(detect_cfg["imgsz"]),
@@ -85,11 +149,14 @@ def main() -> None:
         class_mapping=class_mapping,
     )
 
+    out_dir = cfg.path_value("dqn_out_dir") if args.out_dir is None else args.out_dir
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
     checkpoint = batched_train_dqn(
         image_root=cfg.path_value("image_root"),
         cache_root=cfg.path_value("cache_root"),
         split=args.split,
-        out_dir=cfg.path_value("dqn_out_dir"),
+        out_dir=out_dir,
         cfg=train_cfg,
         env_cfg=env_cfg,
         state_cfg=state_cfg,
