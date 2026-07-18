@@ -1,0 +1,19 @@
+includes:
+  - default.yaml
+
+classes:
+  target_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+infer:
+  device: "cuda"
+  use_cache: false
+
+benchmark:
+  budgeted_crop_counts: []
+  include_fixed_grid_full: false
+  include_gated_variants: false
+  proposal_crop_count: 0
+  detector_gflops: 21.5
+  agent_gflops: 0.0
+  sampling: stratified
+  seed: 42

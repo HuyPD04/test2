@@ -1,6 +1,6 @@
 infer:
   full_imgsz: 640
-  slice_imgsz: 640
+  slice_imgsz: 320
   full_conf: 0.01
   output_conf: 0.30
   iou: 0.7
