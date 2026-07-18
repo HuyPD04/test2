@@ -354,7 +354,7 @@ def get_initial_detection(
 
 
 class AdaptiveSahiInferencer:
-    def __init__(self, weights: Path, checkpoint: Path, cfg: InferenceConfig) -> None:
+    def __init__(self, weights: Path, checkpoint: Path, cfg: InferenceConfig, crop_weights: Path | None = None) -> None:
         self.cfg = cfg
         self.device_t = resolve_torch_device(cfg.policy_device or cfg.device)
         self.yolo_device_t = resolve_torch_device(cfg.device)
@@ -376,12 +376,15 @@ class AdaptiveSahiInferencer:
                 + "; ".join(mismatches)
             )
         self.weights = Path(weights)
+        self.crop_weights = Path(crop_weights) if crop_weights else None
         self.provenance = {
             "weights": file_fingerprint(Path(weights)),
+            "crop_weights": file_fingerprint(Path(crop_weights)) if crop_weights else None,
             "checkpoint": file_fingerprint(Path(checkpoint)),
             "inference_config": asdict(cfg),
         }
         self.yolo = load_yolo(weights, device=self.yolo_device_t)
+        self.crop_yolo = load_yolo(crop_weights, device=self.yolo_device_t) if crop_weights else self.yolo
 
     def infer_image(
         self,
@@ -422,6 +425,7 @@ class AdaptiveSahiInferencer:
             image_path=image_path,
             out_dir=out_dir,
             yolo=self.yolo,
+            crop_yolo=self.crop_yolo,
             policy=self.policy,
             device_t=self.device_t,
             env_cfg=self.env_cfg,
@@ -440,6 +444,7 @@ def _infer_with_loaded(
     image_path: Path,
     out_dir: Path,
     yolo: YOLO,
+    crop_yolo: YOLO,
     policy,
     device_t: torch.device,
     env_cfg,
@@ -603,7 +608,7 @@ def _infer_with_loaded(
         if candidate_rois:
             crop_start = time.perf_counter()
             crop_predictions = run_yolo_on_crops(
-                yolo,
+                crop_yolo,
                 [image_path] * len(candidate_rois),
                 [roi for _, roi, _, _ in candidate_rois],
                 imgsz=cfg.slice_imgsz,
@@ -750,7 +755,7 @@ def _infer_with_loaded(
 
             crop_start = time.perf_counter()
             crop_predictions = run_yolo_on_crops(
-                yolo,
+                crop_yolo,
                 [image_path] * len(pending),
                 [roi for _pending_attempt_idx, roi, _actions, _info in pending],
                 imgsz=cfg.slice_imgsz,

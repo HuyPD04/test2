@@ -63,9 +63,15 @@ def main() -> None:
         save_visualization = True
     if args.no_visualize:
         save_visualization = False
+    try:
+        crop_weights = cfg.path_value("crop_weights")
+    except KeyError:
+        crop_weights = None
+
     inferencer = AdaptiveSahiInferencer(
         weights=cfg.path_value("weights"),
         checkpoint=checkpoint,
+        crop_weights=crop_weights,
         cfg=InferenceConfig(
             full_imgsz=int(infer_cfg["full_imgsz"]),
             slice_imgsz=int(infer_cfg["slice_imgsz"]),

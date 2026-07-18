@@ -13,27 +13,7 @@ def weighted_box_fusion(
     iou_threshold: float = 0.5,
     skip_box_threshold: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Weighted Box Fusion for merging overlapping detections.
 
-    Unlike NMS which keeps only the highest-scoring box, WBF averages the
-    positions of all overlapping boxes weighted by their confidence scores.
-    This produces more accurate bounding box localization, especially at
-    intermediate IoU thresholds (0.55-0.70).
-
-    Parameters
-    ----------
-    boxes_list : list of arrays, each (N_i, 4) in xyxy format
-    scores_list : list of arrays, each (N_i,)
-    classes_list : list of arrays, each (N_i,)
-    iou_threshold : float
-        IoU threshold for considering two boxes as detecting the same object.
-    skip_box_threshold : float
-        Minimum confidence score to keep a box.
-
-    Returns
-    -------
-    fused_boxes, fused_scores, fused_classes : np.ndarray
-    """
     if not boxes_list:
         return (
             np.zeros((0, 4), dtype=np.float32),
