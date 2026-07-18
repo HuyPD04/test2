@@ -3,6 +3,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import sys
+import cv2
+import torch
 import numpy as np
 from ultralytics import YOLO
 
@@ -16,12 +19,134 @@ DEFAULT_AUX_GRID_SIZE = 16
 DEFAULT_SPATIAL_FEATURE_CHANNELS = 4
 
 
-def load_yolo(weights: Path, device: DeviceLike = None) -> YOLO:
-    model = YOLO(str(weights))
-    resolved_device = configure_torch_runtime(device)
-    configure_ultralytics_for_device(resolved_device)
-    model.to(resolved_device)
-    return model
+class _FakeBoxes:
+    def __init__(self, xyxy, conf, cls):
+        self.xyxy = xyxy
+        self.conf = conf
+        self.cls = cls
+
+    def __len__(self):
+        return len(self.xyxy)
+
+class _FakeResults:
+    def __init__(self, boxes, speed):
+        self.boxes = boxes
+        self.speed = speed
+
+class _DummyModel:
+    def __init__(self):
+        self.model = []
+
+class LegacyYOLOWrapper:
+    def __init__(self, weights: Path, device: DeviceLike = None):
+        self.weights = Path(weights).resolve()
+        
+        # Add tph-yolov5 to path
+        repo_dir = self.weights.parent / "tph-yolov5"
+        if not repo_dir.exists():
+            raise FileNotFoundError(f"tph-yolov5 repository not found at {repo_dir}")
+        sys.path.insert(0, str(repo_dir))
+        try:
+            from models.experimental import attempt_load
+            self.pytorch_model = attempt_load(str(self.weights), map_location="cpu")
+        finally:
+            sys.path.pop(0)
+            
+        self.device = configure_torch_runtime(device)
+        self.pytorch_model.to(self.device)
+        self.pytorch_model.eval()
+        self.stride = int(self.pytorch_model.stride.max())
+
+    @property
+    def model(self):
+        return _DummyModel()
+
+    def to(self, device):
+        self.device = configure_torch_runtime(device)
+        self.pytorch_model.to(self.device)
+
+    def predict(
+        self,
+        source,
+        imgsz=640,
+        conf=0.25,
+        iou=0.45,
+        max_det=3000,
+        batch=1,
+        device=None,
+        verbose=False,
+    ):
+        if device is not None:
+            self.to(device)
+            
+        repo_dir = self.weights.parent / "tph-yolov5"
+        sys.path.insert(0, str(repo_dir))
+        try:
+            from utils.augmentations import letterbox
+            from utils.general import non_max_suppression, scale_coords
+        finally:
+            sys.path.pop(0)
+
+        is_single = not isinstance(source, list)
+        sources = [source] if is_single else source
+
+        images_rgb = []
+        original_shapes = []
+        
+        preprocess_start = time.perf_counter()
+        for s in sources:
+            if isinstance(s, (str, Path)):
+                img0 = cv2.imread(str(s))
+            elif isinstance(s, np.ndarray):
+                img0 = s
+            else:
+                raise TypeError(f"Unsupported source type: {type(s)}")
+            original_shapes.append(img0.shape[:2])
+            img = letterbox(img0, imgsz, stride=self.stride, auto=False)[0]
+            img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+            img = np.ascontiguousarray(img)
+            images_rgb.append(img)
+            
+        tensor = torch.from_numpy(np.stack(images_rgb)).to(self.device).float() / 255.0
+        preprocess_time = (time.perf_counter() - preprocess_start) * 1000
+
+        inference_start = time.perf_counter()
+        with torch.no_grad():
+            pred, _ = self.pytorch_model(tensor)
+        inference_time = (time.perf_counter() - inference_start) * 1000
+
+        postprocess_start = time.perf_counter()
+        pred = non_max_suppression(pred, conf, iou, max_det=max_det)
+        
+        results = []
+        for i, det in enumerate(pred):
+            if len(det):
+                det[:, :4] = scale_coords(tensor.shape[2:], det[:, :4], original_shapes[i]).round()
+                
+            xyxy = det[:, :4]
+            scores = det[:, 4]
+            classes = det[:, 5]
+            
+            speed = {
+                "preprocess": preprocess_time / len(sources),
+                "inference": inference_time / len(sources),
+                "postprocess": (time.perf_counter() - postprocess_start) * 1000 / len(sources)
+            }
+            results.append(_FakeResults(_FakeBoxes(xyxy, scores, classes), speed))
+            
+        return results
+
+def load_yolo(weights: Path, device: DeviceLike = None):
+    try:
+        model = YOLO(str(weights))
+        resolved_device = configure_torch_runtime(device)
+        configure_ultralytics_for_device(resolved_device)
+        model.to(resolved_device)
+        return model
+    except Exception as e:
+        if "NOT forwards compatible" in str(e) or "originally trained with" in str(e):
+            return LegacyYOLOWrapper(weights, device)
+        raise
 
 
 def detect_one_image(

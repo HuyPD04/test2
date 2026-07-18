@@ -4,7 +4,7 @@ infer:
   full_conf: 0.01
   output_conf: 0.30
   iou: 0.7
-  merge_iou: 0.5
+  merge_iou: 0.35
   max_det: 3000
   min_slice_detections: 1
   min_slice_utility: 0.3
