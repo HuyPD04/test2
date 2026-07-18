@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.eval.benchmark import (
+    _ap_from_pr,
     _effective_warmup_images,
+    _evaluate_method,
     _precision_recall_at_iou,
     select_benchmark_images,
 )
@@ -20,7 +22,7 @@ from rl_sahi.common.config import load_default_config
 class BenchmarkSamplingTest(unittest.TestCase):
     def test_project_target_classes_are_explicit(self) -> None:
         cfg = load_default_config(None, ROOT)
-        self.assertEqual(cfg.target_classes(), (0, 2, 3, 5, 8, 9))
+        self.assertEqual(cfg.target_classes(), tuple(range(10)))
 
     def test_stratified_sampling_covers_sequences_before_repeating(self) -> None:
         images = [
@@ -68,6 +70,40 @@ class BenchmarkSamplingTest(unittest.TestCase):
         )
         self.assertAlmostEqual(precision, 2.0 / 3.0)
         self.assertAlmostEqual(recall, 1.0)
+
+    def test_ap_uses_coco_101_point_interpolation(self) -> None:
+        ap = _ap_from_pr(
+            np.asarray([1.0, 0.0], dtype=np.float32),
+            np.asarray([0.0, 1.0], dtype=np.float32),
+            total_gt=2,
+        )
+        self.assertAlmostEqual(ap, 51.0 / 101.0, places=6)
+
+    def test_eval_max_detections_is_applied_per_image_and_class(self) -> None:
+        ground_truth = {
+            "a": (
+                np.asarray([[0, 0, 10, 10]], dtype=np.float32),
+                np.asarray([0], dtype=np.float32),
+                (40, 40),
+            )
+        }
+        predictions = {
+            "a": (
+                np.asarray([[30, 30, 39, 39], [0, 0, 10, 10]], dtype=np.float32),
+                np.asarray([0.99, 0.50], dtype=np.float32),
+                np.asarray([1, 0], dtype=np.float32),
+            )
+        }
+        metrics = _evaluate_method(
+            predictions,
+            ground_truth,
+            target_classes=(0, 1),
+            iou_threshold=0.5,
+            small_area_threshold=1.0,
+            max_detections=1,
+        )
+        self.assertAlmostEqual(metrics["AP50"], 1.0)
+        self.assertEqual(metrics["eval_max_detections"], 1.0)
 
 
 if __name__ == "__main__":

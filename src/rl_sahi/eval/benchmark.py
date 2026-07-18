@@ -67,6 +67,7 @@ class BenchmarkConfig:
     warmup_images: int = 10
     detector_gflops: float = 21.5
     agent_gflops: float = 0.0
+    eval_max_detections: int = 500
     target_classes: tuple[int, ...] = (0, 2, 3, 5, 8, 9)
     class_mapping: ClassMapping = field(default_factory=ClassMapping)
 
@@ -769,17 +770,49 @@ def _predict_rl_sahi(
     return boxes, scores, classes, len(accepted_rois), crop_inference_count
 
 
+def _limit_predictions_per_image(
+    predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
+    max_detections: int,
+) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    if int(max_detections) <= 0:
+        return predictions
+    limited: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    for image_id, (boxes, scores, classes) in predictions.items():
+        classes_i64 = classes.astype(np.int64)
+        if len(scores) == 0:
+            limited[image_id] = (boxes, scores, classes)
+            continue
+        keep_parts: list[np.ndarray] = []
+        for cls in np.unique(classes_i64):
+            cls_indices = np.flatnonzero(classes_i64 == int(cls))
+            if len(cls_indices) > int(max_detections):
+                cls_order = np.argsort(np.asarray(scores[cls_indices], dtype=np.float32))[::-1]
+                cls_indices = cls_indices[cls_order[: int(max_detections)]]
+            keep_parts.append(cls_indices.astype(np.int64))
+        order = np.concatenate(keep_parts, axis=0) if keep_parts else np.zeros((0,), dtype=np.int64)
+        limited[image_id] = (boxes[order], scores[order], classes[order])
+    return limited
+
+
+def _ap_metric_name(iou_threshold: float) -> str:
+    return f"AP{int(round(float(iou_threshold) * 100.0)):02d}"
+
+
 def _ap_from_pr(tp: np.ndarray, fp: np.ndarray, total_gt: int) -> float:
     if total_gt == 0 or len(tp) == 0:
         return 0.0
     recall = np.cumsum(tp) / max(float(total_gt), 1.0)
     precision = np.cumsum(tp) / np.maximum(np.cumsum(tp) + np.cumsum(fp), 1e-9)
     recall = np.concatenate([[0.0], recall, [1.0]])
-    precision = np.concatenate([[1.0], precision, [0.0]])
+    precision = np.concatenate([[0.0], precision, [0.0]])
     for i in range(len(precision) - 1, 0, -1):
         precision[i - 1] = max(precision[i - 1], precision[i])
-    changed = np.flatnonzero(recall[1:] != recall[:-1])
-    return float(np.sum((recall[changed + 1] - recall[changed]) * precision[changed + 1]))
+    recall_thresholds = np.linspace(0.0, 1.0, 101)
+    indices = np.searchsorted(recall, recall_thresholds, side="left")
+    sampled = np.zeros((len(recall_thresholds),), dtype=np.float32)
+    valid = indices < len(precision)
+    sampled[valid] = precision[indices[valid]]
+    return float(np.mean(sampled))
 
 
 def _ap_and_fp_at_iou(
@@ -903,7 +936,9 @@ def _evaluate_method(
     target_classes: tuple[int, ...],
     iou_threshold: float,
     small_area_threshold: float,
+    max_detections: int = 500,
 ) -> dict[str, float]:
+    predictions = _limit_predictions_per_image(predictions, max_detections)
     ap_thresholds = tuple(float(x) for x in np.arange(0.50, 0.96, 0.05))
     per_class: dict[int, dict[float, tuple[float, int]]] = {}
     for cls in target_classes:
@@ -957,7 +992,10 @@ def _evaluate_method(
         "recall": recall,
         "small_recall": _small_recall_at_iou(predictions, ground_truth, iou_threshold, small_area_threshold),
         "fp_per_image": float(total_fp / max(len(ground_truth), 1)),
+        "eval_max_detections": float(max_detections),
     }
+    for threshold, value in zip(ap_thresholds, ap_values):
+        metrics[_ap_metric_name(threshold)] = float(value)
     for cls in target_classes:
         class_ap_values = [per_class[int(cls)][threshold][0] for threshold in ap_thresholds]
         class_ap50, class_fp50 = per_class[int(cls)][threshold_50]
@@ -1057,6 +1095,7 @@ def evaluate_rl_sahi_policy(
         bench_cfg.target_classes,
         bench_cfg.iou_threshold,
         small_threshold,
+        bench_cfg.eval_max_detections,
     )
     return {
         **metrics,
@@ -1390,6 +1429,7 @@ def benchmark_split(
             bench_cfg.target_classes,
             bench_cfg.iou_threshold,
             small_threshold,
+            bench_cfg.eval_max_detections,
         )
         crop_mean = float(np.mean(crops[method]))
         incremental_ms = float(np.mean(latency[method]) * 1000.0)

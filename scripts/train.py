@@ -211,6 +211,7 @@ def main() -> None:
             ),
             sampling=str(benchmark_cfg.get("sampling", "stratified")),
             seed=int(benchmark_cfg.get("seed", 42)),
+            eval_max_detections=int(benchmark_cfg.get("eval_max_detections", 500)),
             target_classes=target_classes,
             class_mapping=class_mapping,
         ),

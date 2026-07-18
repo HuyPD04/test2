@@ -131,6 +131,7 @@ def main() -> None:
             warmup_images=int(benchmark_cfg.get("warmup_images", 10)),
             detector_gflops=float(benchmark_cfg.get("detector_gflops", 21.5)),
             agent_gflops=float(benchmark_cfg.get("agent_gflops", 0.0)),
+            eval_max_detections=int(benchmark_cfg.get("eval_max_detections", 500)),
             target_classes=target_classes,
             class_mapping=class_mapping,
         ),

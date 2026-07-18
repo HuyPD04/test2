@@ -192,7 +192,8 @@ def build(
             "",
             "- Local test split: VisDrone2019-DET test-dev (1,610 labeled images).",
             "- Local val split: VisDrone2019-DET val (548 labeled images).",
-            "- Local AP is the mean over IoU 0.50:0.95; AP50 and AP75 use their single IoU thresholds.",
+            "- Local AP uses COCO-style 101-point interpolation over IoU 0.50:0.95 with maxDets=500; "
+            "AP50 and AP75 use their single IoU thresholds. YOLO labels do not preserve VisDrone ignored-region metadata.",
             "- Effective GFLOPs follows Thesis.pdf: agent GFLOPs + detector GFLOPs x (1 + slices). "
             "YOLO11s is configured as 21.5 GFLOPs/pass; agent FLOPs are currently treated as negligible (0.0).",
             "- `2602.07512v2.pdf` is ZoomDet, not ASAHI. ASAHI values come from `2604.19233v1.pdf`.",

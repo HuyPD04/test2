@@ -9,6 +9,7 @@ infer:
   use_cache: false
 
 benchmark:
+  eval_max_detections: 500
   budgeted_crop_counts: []
   include_fixed_grid_full: false
   include_gated_variants: false
