@@ -5,7 +5,7 @@ paths:
   cache_root: data/cache
   dqn_out_dir: runs/dqn
   infer_out_dir: runs/infer
-  checkpoint: runs/dqn/best.pt
+  checkpoint: runs/dqn/tph-yolov5.pt
   query_dqn_out_dir: runs/query_rl
   query_infer_out_dir: runs/query_infer
   query_checkpoint: runs/query_rl/best.pt
