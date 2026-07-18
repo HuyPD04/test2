@@ -35,6 +35,7 @@ from rl_sahi.inference.merge import (
     save_prediction_txt,
     source_counts_after_merge,
 )
+from rl_sahi.common.wbf import weighted_box_fusion
 from rl_sahi.inference.rollout import rollout_one_slice
 from rl_sahi.inference.roi_prefilter import score_roi_candidates, select_roi_candidates
 from rl_sahi.inference.visualize import save_inference_visual
@@ -838,8 +839,23 @@ def _infer_with_loaded(
     sources = np.concatenate(sources_parts, axis=0) if sources_parts else np.zeros((0,), dtype=np.int32)
 
     boxes = clip_boxes(boxes, det.image_shape)
-    keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou)
-    boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
+    if cfg.use_wbf:
+        boxes, scores, classes = weighted_box_fusion(
+            [boxes], [scores], [classes], iou_threshold=cfg.merge_iou,
+        )
+        # Re-derive sources: for each fused box, find the closest original box
+        # and assign its source.
+        orig_boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
+        orig_sources = sources.copy()
+        if len(boxes) > 0 and len(orig_boxes) > 0:
+            from rl_sahi.common.box_geometry import iou_matrix as _iou_matrix
+            match_ious = _iou_matrix(boxes, clip_boxes(orig_boxes, det.image_shape))
+            sources = orig_sources[match_ious.argmax(axis=1)]
+        else:
+            sources = np.zeros((len(boxes),), dtype=np.int32)
+    else:
+        keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou)
+        boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 
     out_dir = Path(out_dir)
@@ -1044,6 +1060,7 @@ def infer_one_image(
             if batched_inference is None
             else _bool_value(batched_inference)
         ),
+        use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
         class_mapping=class_mapping or ClassMapping.from_config(project_cfg.section("classes")),
     )
     inferencer = AdaptiveSahiInferencer(weights=weights, checkpoint=checkpoint, cfg=cfg)

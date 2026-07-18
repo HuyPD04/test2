@@ -32,4 +32,5 @@ class InferenceConfig:
     save_metadata: bool = True
     save_visualization: bool = False
     batched_inference: bool = False
+    use_wbf: bool = False
     class_mapping: ClassMapping = field(default_factory=ClassMapping)

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from rl_sahi.common.boxes import clip_boxes, iou_matrix, nms_numpy
+from rl_sahi.common.wbf import weighted_box_fusion
 
 
 def save_prediction_txt(
@@ -39,6 +40,7 @@ def merge_predictions(
     boxes_parts: list[np.ndarray],
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
+    use_wbf: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -49,6 +51,8 @@ def merge_predictions(
     if len(boxes) == 0:
         return boxes, scores, classes
     boxes = clip_boxes(boxes, image_shape)
+    if use_wbf:
+        return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
     keep = class_aware_nms(boxes, scores, classes, merge_iou)
     return boxes[keep], scores[keep], classes[keep]
 

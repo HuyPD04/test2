@@ -9,7 +9,7 @@ infer:
   min_slice_detections: 1
   min_slice_utility: 0.3
   min_new_detection_score: 0.1
-  duplicate_iou: 0.3
+  duplicate_iou: 0.5
   max_slice_attempts: 4
   roi_prefilter_enabled: true
   roi_prefilter_topk: 3
@@ -20,6 +20,7 @@ infer:
   save_metadata: true
   save_visualization: false
   batched_inference: true
+  use_wbf: true
   device: "cuda"
   policy_device: "cuda"
   feature_layers:

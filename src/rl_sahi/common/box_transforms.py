@@ -40,10 +40,6 @@ def clip_boxes(boxes: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
     if boxes.size == 0:
         return boxes
     h, w = image_shape
-    boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, max(0, w - 1))
-    boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, max(0, h - 1))
-    boxes[:, 2] = np.maximum(boxes[:, 2], boxes[:, 0] + 1.0)
-    boxes[:, 3] = np.maximum(boxes[:, 3], boxes[:, 1] + 1.0)
     boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w)
     boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h)
     return boxes.astype(np.float32)
