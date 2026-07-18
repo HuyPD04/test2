@@ -31,6 +31,13 @@ benchmark:
   iou_threshold: 0.5
   fixed_slice_fraction: 0.35
   fixed_overlap: 0.2
+  include_sahi_library: false
+  sahi_model_type: yolov8
+  sahi_slice_height: 640
+  sahi_slice_width: 640
+  sahi_overlap: 0.2
+  sahi_perform_standard_pred: true
+  sahi_auto_slice_resolution: false
   budgeted_crop_counts:
     - 4
     - 8

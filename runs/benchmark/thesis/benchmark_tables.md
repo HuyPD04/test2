@@ -11,8 +11,8 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | ASAHI (12 slices) | ASAHI paper | 29.3 | 41.9 | 22.8 | 2.98 |
 | ASAHI (15 slices) | ASAHI paper | 27.2 | 40.9 | 21.3 | 2.39 |
 | ASAHI (adaptive) | ASAHI paper | 30.4 | 45.6 | 25.2 | 4.88 |
-| YOLO11s only | local | 16.62 | 28.70 | 16.97 | 24.36 |
-| RL-SAHI (proposed) | local | 19.35 | 34.45 | 19.13 | 4.51 |
+| YOLO11s only | local | 16.62 | 28.70 | 16.97 | 20.53 |
+| RL-SAHI (proposed) | local | 18.97 | 33.93 | 18.71 | 4.83 |
 
 > ASAHI paper values are reference-only: its TPH-YOLOv5 detector and hardware differ from the local YOLO11s pipeline, so the speed values are not controlled hardware comparisons.
 
@@ -25,44 +25,44 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | QueryDet (RetinaNet-50, CSQ) | 28.32 | 48.14 | 28.75 | CVPR 2022 |
 | AD-Det* (ResNeXt-101) | 37.50 | 60.90 | 39.20 | Remote Sensing 2025 |
 | TPH+ASAHI | 36.00 | 56.80 | 28.20 | arXiv:2604.19233 |
-| RL-SAHI (proposed, YOLO11s) | 25.47 | 43.49 | 25.41 | local run |
+| RL-SAHI (proposed, YOLO11s) | 25.82 | 44.21 | 25.59 | local run |
 
 ## Internal detection diagnostics - local test run
 
 | Method | Precision@0.50 | Recall@0.50 | Recall-small@0.50 | FP/image |
 |---|---:|---:|---:|---:|
-| YOLO11s only | 14.90 | 54.37 | 31.62 | 144.84 |
-| SAHI budget 4 | 15.02 | 69.49 | 56.62 | 183.36 |
-| SAHI budget 6 | 14.12 | 71.69 | 59.64 | 203.33 |
-| SAHI budget 12 | 12.56 | 74.43 | 62.90 | 241.75 |
-| SAHI budget 15 | 12.16 | 74.90 | 63.36 | 252.46 |
-| RL-SAHI | 15.59 | 63.69 | 48.31 | 160.84 |
+| YOLO11s only | 14.90 | 54.37 | 31.62 | 144.83 |
+| SAHI budget 4 | 15.78 | 66.93 | 51.57 | 166.66 |
+| SAHI budget 6 | 15.04 | 68.76 | 53.88 | 181.24 |
+| SAHI budget 12 | 13.76 | 71.15 | 56.48 | 208.05 |
+| SAHI budget 15 | 13.42 | 71.54 | 56.81 | 215.32 |
+| RL-SAHI | 16.87 | 62.57 | 46.12 | 143.81 |
 
 ## Internal efficiency - local test run
 
 | Method | Latency (ms/image) | Speed (img/s) | Slices/image | Detector calls/image | Effective GFLOPs |
 |---|---:|---:|---:|---:|---:|
-| YOLO11s only | 41.1 | 24.36 | 0.00 | 1.00 | 21.5 |
-| SAHI budget 4 | 99.4 | 10.06 | 4.00 | 5.00 | 107.5 |
-| SAHI budget 6 | 121.7 | 8.22 | 6.00 | 7.00 | 150.5 |
-| SAHI budget 12 | 201.2 | 4.97 | 12.00 | 13.00 | 279.5 |
-| SAHI budget 15 | 244.1 | 4.10 | 15.00 | 16.00 | 344.0 |
-| RL-SAHI | 221.6 | 4.51 | 3.00 | 4.00 | 86.0 |
+| YOLO11s only | 48.7 | 20.53 | 0.00 | 1.00 | 21.5 |
+| SAHI budget 4 | 88.9 | 11.25 | 4.00 | 5.00 | 107.5 |
+| SAHI budget 6 | 96.0 | 10.41 | 6.00 | 7.00 | 150.5 |
+| SAHI budget 12 | 123.5 | 8.10 | 12.00 | 13.00 | 279.5 |
+| SAHI budget 15 | 140.0 | 7.14 | 15.00 | 16.00 | 344.0 |
+| RL-SAHI | 207.2 | 4.83 | 3.00 | 4.00 | 86.0 |
 
 ## Per-class AP - proposed method
 
 | Class | Test AP | Test AP50 | Val AP | Val AP50 |
 |---|---:|---:|---:|---:|
-| 0: pedestrian | 14.10 | 35.00 | 23.84 | 52.48 |
-| 1: people | 6.26 | 18.79 | 14.58 | 38.41 |
-| 2: bicycle | 5.02 | 11.59 | 6.74 | 16.27 |
-| 3: car | 45.58 | 74.78 | 57.00 | 83.57 |
-| 4: van | 21.23 | 31.56 | 30.92 | 43.49 |
-| 5: truck | 25.56 | 40.82 | 27.02 | 40.10 |
-| 6: tricycle | 12.04 | 22.63 | 16.22 | 29.82 |
-| 7: awning-tricycle | 10.74 | 18.55 | 9.59 | 15.28 |
-| 8: bus | 38.53 | 54.86 | 46.22 | 64.15 |
-| 9: motor | 14.46 | 35.95 | 22.53 | 51.33 |
+| 0: pedestrian | 13.89 | 34.74 | 23.99 | 52.64 |
+| 1: people | 5.84 | 17.44 | 14.75 | 39.09 |
+| 2: bicycle | 4.86 | 11.11 | 7.18 | 17.32 |
+| 3: car | 45.39 | 74.42 | 57.21 | 83.26 |
+| 4: van | 20.88 | 30.98 | 32.08 | 44.88 |
+| 5: truck | 25.44 | 41.08 | 27.46 | 41.51 |
+| 6: tricycle | 11.21 | 21.63 | 17.57 | 31.94 |
+| 7: awning-tricycle | 10.21 | 17.44 | 9.89 | 16.41 |
+| 8: bus | 37.83 | 54.76 | 44.86 | 62.46 |
+| 9: motor | 14.15 | 35.72 | 23.21 | 52.55 |
 
 ## Protocol and provenance notes
 

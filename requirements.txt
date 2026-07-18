@@ -4,3 +4,4 @@ PyYAML
 torch
 torch-directml; platform_system == "Windows"
 ultralytics
+sahi

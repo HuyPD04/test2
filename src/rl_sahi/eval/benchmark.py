@@ -43,6 +43,16 @@ class BenchmarkConfig:
     fixed_overlap: float = 0.2
     budgeted_crop_counts: tuple[int, ...] = (4, 8, 12)
     include_fixed_grid_full: bool = True
+    include_sahi_library: bool = False
+    sahi_model_type: str = "yolov8"
+    sahi_slice_height: int = 640
+    sahi_slice_width: int = 640
+    sahi_overlap: float = 0.2
+    sahi_perform_standard_pred: bool = True
+    sahi_auto_slice_resolution: bool = False
+    sahi_postprocess_type: str = "GREEDYNMM"
+    sahi_postprocess_match_metric: str = "IOS"
+    sahi_postprocess_match_threshold: float = 0.5
     include_gated_variants: bool = True
     proposal_crop_count: int = 8
     proposal_min_conf: float = 0.01
@@ -232,6 +242,109 @@ def _fixed_grid_rois(image_shape: tuple[int, int], fraction: float, overlap: flo
         for x in xs:
             rois.append(np.asarray([x, y, min(x + side, w), min(y + side, h)], dtype=np.float32))
     return rois
+
+
+def _sahi_device_name(device: torch.device) -> str:
+    if device.type == "cuda":
+        return f"cuda:{0 if device.index is None else device.index}"
+    return str(device)
+
+
+def _load_sahi_detection_model(weights: Path, cfg: BenchmarkConfig, device: torch.device):
+    try:
+        from sahi import AutoDetectionModel
+    except ImportError as exc:
+        raise RuntimeError(
+            "benchmark.include_sahi_library=true requires the 'sahi' package. "
+            "Install it with `pip install sahi`."
+        ) from exc
+    return AutoDetectionModel.from_pretrained(
+        model_type=cfg.sahi_model_type,
+        model_path=str(weights),
+        confidence_threshold=float(cfg.output_conf),
+        device=_sahi_device_name(device),
+    )
+
+
+def _sahi_slice_count(image_shape: tuple[int, int], cfg: BenchmarkConfig) -> int:
+    try:
+        from sahi.slicing import get_slice_bboxes
+    except ImportError as exc:
+        raise RuntimeError(
+            "benchmark.include_sahi_library=true requires the 'sahi' package. "
+            "Install it with `pip install sahi`."
+        ) from exc
+    h, w = image_shape
+    return len(
+        get_slice_bboxes(
+            image_height=int(h),
+            image_width=int(w),
+            slice_height=int(cfg.sahi_slice_height),
+            slice_width=int(cfg.sahi_slice_width),
+            auto_slice_resolution=bool(cfg.sahi_auto_slice_resolution),
+            overlap_height_ratio=float(cfg.sahi_overlap),
+            overlap_width_ratio=float(cfg.sahi_overlap),
+        )
+    )
+
+
+def _predict_sahi_library(
+    image_path: Path,
+    detection_model,
+    image_shape: tuple[int, int],
+    infer_cfg: InferenceConfig,
+    bench_cfg: BenchmarkConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    try:
+        from sahi.predict import get_sliced_prediction
+    except ImportError as exc:
+        raise RuntimeError(
+            "benchmark.include_sahi_library=true requires the 'sahi' package. "
+            "Install it with `pip install sahi`."
+        ) from exc
+
+    result = get_sliced_prediction(
+        str(image_path),
+        detection_model,
+        slice_height=int(bench_cfg.sahi_slice_height),
+        slice_width=int(bench_cfg.sahi_slice_width),
+        overlap_height_ratio=float(bench_cfg.sahi_overlap),
+        overlap_width_ratio=float(bench_cfg.sahi_overlap),
+        perform_standard_pred=bool(bench_cfg.sahi_perform_standard_pred),
+        postprocess_type=str(bench_cfg.sahi_postprocess_type),
+        postprocess_match_metric=str(bench_cfg.sahi_postprocess_match_metric),
+        postprocess_match_threshold=float(bench_cfg.sahi_postprocess_match_threshold),
+        postprocess_class_agnostic=False,
+        verbose=0,
+        auto_slice_resolution=bool(bench_cfg.sahi_auto_slice_resolution),
+    )
+    boxes: list[list[float]] = []
+    scores: list[float] = []
+    classes: list[float] = []
+    for prediction in result.object_prediction_list:
+        boxes.append([float(value) for value in prediction.bbox.to_xyxy()])
+        scores.append(float(prediction.score.value))
+        classes.append(float(prediction.category.id))
+
+    if not boxes:
+        pred_boxes, pred_scores, pred_classes = _empty_preds()
+    else:
+        pred_boxes = np.asarray(boxes, dtype=np.float32).reshape(-1, 4)
+        pred_scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+        pred_classes = infer_cfg.class_mapping.map_model_classes(
+            np.asarray(classes, dtype=np.float32).reshape(-1)
+        )
+        pred_boxes, pred_scores, pred_classes = _filter_classes(
+            pred_boxes,
+            pred_scores,
+            pred_classes,
+            infer_cfg.target_classes,
+        )
+        pred_boxes = clip_boxes(pred_boxes, image_shape)
+
+    slice_count = _sahi_slice_count(image_shape, bench_cfg)
+    detector_calls = slice_count + (1 if bench_cfg.sahi_perform_standard_pred else 0)
+    return pred_boxes, pred_scores, pred_classes, slice_count, detector_calls
 
 
 def _proposal_quality(scores: np.ndarray, bench_cfg: BenchmarkConfig) -> np.ndarray:
@@ -981,6 +1094,11 @@ def benchmark_split(
     small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
     detector_device_t = resolve_torch_device(infer_cfg.device)
     model = load_yolo(weights, device=detector_device_t)
+    sahi_model = (
+        _load_sahi_detection_model(weights, bench_cfg, detector_device_t)
+        if bench_cfg.include_sahi_library
+        else None
+    )
     device_t = resolve_torch_device(infer_cfg.policy_device or infer_cfg.device)
     policy, checkpoint_data = load_policy(checkpoint, device_t)
     env_cfg = checkpoint_data["env_cfg_obj"]
@@ -996,6 +1114,8 @@ def benchmark_split(
     proposal_method = f"proposal_sahi_{int(bench_cfg.proposal_crop_count)}"
     proposal_gated_method = f"{proposal_method}_gated"
     method_names = ["yolo_full"]
+    if bench_cfg.include_sahi_library:
+        method_names.append("sahi_library")
     if bench_cfg.include_fixed_grid_full:
         method_names.append("fixed_grid_sahi")
         if bench_cfg.include_gated_variants:
@@ -1012,7 +1132,11 @@ def benchmark_split(
     predictions = {name: {} for name in method_names}
     crops = {key: [] for key in predictions}
     accepted_crops = {key: [] for key in predictions}
+    detector_calls = {key: [] for key in predictions}
     latency = {key: [] for key in predictions}
+    uses_initial_state = {key: True for key in predictions}
+    if "sahi_library" in uses_initial_state:
+        uses_initial_state["sahi_library"] = False
     initial_state_latency: list[float] = []
     warmup_images = _effective_warmup_images(len(images), bench_cfg.warmup_images)
     timed_images = len(images) - warmup_images
@@ -1069,6 +1193,23 @@ def benchmark_split(
             latency["yolo_full"].append(time.perf_counter() - start)
         crops["yolo_full"].append(0)
         accepted_crops["yolo_full"].append(0)
+        detector_calls["yolo_full"].append(1)
+
+        if sahi_model is not None:
+            start = time.perf_counter()
+            boxes, scores, classes, slice_count, call_count = _predict_sahi_library(
+                image_path,
+                sahi_model,
+                det.image_shape,
+                infer_cfg,
+                bench_cfg,
+            )
+            predictions["sahi_library"][image_id] = (boxes, scores, classes)
+            if measure_latency:
+                latency["sahi_library"].append(time.perf_counter() - start)
+            crops["sahi_library"].append(slice_count)
+            accepted_crops["sahi_library"].append(slice_count)
+            detector_calls["sahi_library"].append(call_count)
 
         fixed_rois = _fixed_grid_rois(det.image_shape, bench_cfg.fixed_slice_fraction, bench_cfg.fixed_overlap)
         fixed_scores = _score_rois(fixed_rois, det, infer_cfg, bench_cfg)
@@ -1101,6 +1242,7 @@ def benchmark_split(
                 )
             crops["fixed_grid_sahi"].append(crop_count)
             accepted_crops["fixed_grid_sahi"].append(accepted_crop_count)
+            detector_calls["fixed_grid_sahi"].append(1 + crop_count)
             if bench_cfg.include_gated_variants:
                 post_start = time.perf_counter()
                 boxes, scores, classes, accepted_crop_count, crop_count = _predict_from_crop_predictions(
@@ -1118,6 +1260,7 @@ def benchmark_split(
                     )
                 crops["fixed_grid_sahi_gated"].append(crop_count)
                 accepted_crops["fixed_grid_sahi_gated"].append(accepted_crop_count)
+                detector_calls["fixed_grid_sahi_gated"].append(1 + crop_count)
 
         for budget, method in budgeted_methods.items():
             selected = _select_top_rois(
@@ -1152,6 +1295,7 @@ def benchmark_split(
                 latency[method].append(crop_latency + time.perf_counter() - post_start)
             crops[method].append(crop_count)
             accepted_crops[method].append(accepted_crop_count)
+            detector_calls[method].append(1 + crop_count)
             if bench_cfg.include_gated_variants:
                 gated_method = gated_budgeted_methods[budget]
                 post_start = time.perf_counter()
@@ -1168,6 +1312,7 @@ def benchmark_split(
                     latency[gated_method].append(crop_latency + time.perf_counter() - post_start)
                 crops[gated_method].append(crop_count)
                 accepted_crops[gated_method].append(accepted_crop_count)
+                detector_calls[gated_method].append(1 + crop_count)
 
         if int(bench_cfg.proposal_crop_count) > 0:
             proposal_rois = _proposal_rois(det, infer_cfg, bench_cfg, int(bench_cfg.proposal_crop_count))
@@ -1198,6 +1343,7 @@ def benchmark_split(
                 )
             crops[proposal_method].append(crop_count)
             accepted_crops[proposal_method].append(accepted_crop_count)
+            detector_calls[proposal_method].append(1 + crop_count)
             if bench_cfg.include_gated_variants:
                 post_start = time.perf_counter()
                 boxes, scores, classes, accepted_crop_count, crop_count = _predict_from_crop_predictions(
@@ -1215,6 +1361,7 @@ def benchmark_split(
                     )
                 crops[proposal_gated_method].append(crop_count)
                 accepted_crops[proposal_gated_method].append(accepted_crop_count)
+                detector_calls[proposal_gated_method].append(1 + crop_count)
 
         start = time.perf_counter()
         boxes, scores, classes, accepted_crop_count, crop_count = _predict_rl_sahi(
@@ -1225,6 +1372,7 @@ def benchmark_split(
             latency["rl_sahi"].append(time.perf_counter() - start)
         crops["rl_sahi"].append(crop_count)
         accepted_crops["rl_sahi"].append(accepted_crop_count)
+        detector_calls["rl_sahi"].append(1 + crop_count)
 
     rows: list[dict[str, float | str]] = []
     mean_initial_ms = float(np.mean(initial_state_latency) * 1000.0)
@@ -1239,7 +1387,9 @@ def benchmark_split(
         )
         crop_mean = float(np.mean(crops[method]))
         incremental_ms = float(np.mean(latency[method]) * 1000.0)
-        end_to_end_ms = mean_initial_ms + incremental_ms
+        initial_ms = mean_initial_ms if uses_initial_state.get(method, True) else 0.0
+        end_to_end_ms = initial_ms + incremental_ms
+        detector_calls_mean = float(np.mean(detector_calls[method]))
         rows.append(
             {
                 "method": method,
@@ -1250,12 +1400,12 @@ def benchmark_split(
                     np.sum(accepted_crops[method]) / max(float(np.sum(crops[method])), 1.0)
                 ),
                 "latency_ms_per_image": incremental_ms,
-                "initial_state_ms_per_image": mean_initial_ms,
+                "initial_state_ms_per_image": initial_ms,
                 "end_to_end_ms_per_image": end_to_end_ms,
                 "images_per_second": float(1000.0 / max(end_to_end_ms, 1e-9)),
-                "detector_calls_per_image": 1.0 + crop_mean,
+                "detector_calls_per_image": detector_calls_mean,
                 "effective_gflops": float(
-                    bench_cfg.agent_gflops + bench_cfg.detector_gflops * (1.0 + crop_mean)
+                    bench_cfg.agent_gflops + bench_cfg.detector_gflops * detector_calls_mean
                 ),
                 "images": float(len(images)),
                 "warmup_images": float(warmup_images),

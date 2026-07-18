@@ -10,7 +10,17 @@ infer:
   use_cache: false
 
 benchmark:
-  budgeted_crop_counts: [4, 6, 12, 15]
+  # Use the official SAHI library for the SAHI baseline.
+  include_sahi_library: true
+  sahi_model_type: yolov8
+  sahi_slice_height: 640
+  sahi_slice_width: 640
+  sahi_overlap: 0.2
+  sahi_perform_standard_pred: true
+  sahi_auto_slice_resolution: false
+  # Custom budgeted fixed-grid baselines are disabled in thesis runs so they are
+  # not confused with library SAHI.
+  budgeted_crop_counts: []
   include_fixed_grid_full: false
   include_gated_variants: false
   proposal_crop_count: 0

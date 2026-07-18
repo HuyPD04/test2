@@ -7,7 +7,7 @@ YOLO full-image reference: AP=20.91, AP50=35.03, Recall-small@0.50=40.50.
 
 | Variant | Spatial feature | Detection map | History | Outcome reward | Cost/overlap | Action mask | AP | Delta AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Full RL-SAHI | Yes | Yes | Yes | Yes | Yes | Yes | 25.47 | +0.00 | 43.49 | 25.41 | 65.89 | 238.09 | 3.00 | 2.42 |
+| Full RL-SAHI | Yes | Yes | Yes | Yes | Yes | Yes | 25.82 | +0.00 | 44.21 | 25.59 | 64.14 | 238.09 | 3.00 | 2.42 |
 | w/o spatial feature | No | Yes | Yes | Yes | Yes | Yes | 21.68 | -3.78 | 36.94 | 21.69 | 45.15 | 170.94 | 3.00 | 2.51 |
 | w/o detection map | Yes | No | Yes | Yes | Yes | Yes | 21.23 | -4.24 | 36.04 | 21.30 | 43.09 | 164.95 | 3.00 | 2.40 |
 | w/o history | Yes | Yes | No | Yes | Yes | Yes | 22.32 | -3.15 | 37.88 | 22.46 | 48.79 | 183.86 | 3.00 | 2.38 |

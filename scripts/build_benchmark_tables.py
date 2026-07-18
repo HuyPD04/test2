@@ -114,10 +114,11 @@ def build(
 
     local_methods = [
         ("YOLO11s only", "yolo_full"),
-        ("SAHI budget 4", "fixed_grid_budget_4"),
-        ("SAHI budget 6", "fixed_grid_budget_6"),
-        ("SAHI budget 12", "fixed_grid_budget_12"),
-        ("SAHI budget 15", "fixed_grid_budget_15"),
+        ("SAHI library", "sahi_library"),
+        ("Fixed-grid Top-K 4", "fixed_grid_budget_4"),
+        ("Fixed-grid Top-K 6", "fixed_grid_budget_6"),
+        ("Fixed-grid Top-K 12", "fixed_grid_budget_12"),
+        ("Fixed-grid Top-K 15", "fixed_grid_budget_15"),
         ("RL-SAHI", "rl_sahi"),
     ]
     lines.extend(
