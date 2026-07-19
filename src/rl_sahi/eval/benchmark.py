@@ -226,7 +226,30 @@ def _merge_predictions(
     return boxes[keep], scores[keep], classes[keep]
 
 
-def _full_predictions(det: DetectionCache, cfg: InferenceConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _full_predictions(
+    det: DetectionCache, 
+    cfg: InferenceConfig,
+    image_path: Path | None = None,
+    crop_model=None,
+    model=None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if model is not None and crop_model is not None and model is not crop_model and image_path is not None:
+        from rl_sahi.inference.crops import run_yolo_on_crops
+        import numpy as np
+        full_preds = run_yolo_on_crops(
+            crop_model,
+            [image_path],
+            [np.array([0, 0, det.image_shape[1], det.image_shape[0]], dtype=np.float32)],
+            imgsz=cfg.full_imgsz,
+            conf=cfg.output_conf,
+            iou=cfg.iou,
+            max_det=cfg.max_det,
+            device=cfg.device,
+        )[0]
+        boxes, scores, classes = full_preds
+        classes = cfg.class_mapping.map_model_classes(classes)
+        return _filter_classes(boxes, scores, classes, cfg.target_classes)
+
     mask = det.scores >= cfg.output_conf
     boxes, scores = det.boxes[mask], det.scores[mask]
     classes = cfg.class_mapping.map_model_classes(det.classes[mask])
@@ -554,7 +577,9 @@ def _predict_rl_sahi(
         cfg.target_classes,
         cfg.class_mapping,
     )
-    full_boxes, full_scores, full_classes = _full_predictions(det, cfg)
+    full_boxes, full_scores, full_classes = _full_predictions(
+        det, cfg, image_path=image_path, crop_model=crop_model, model=model
+    )
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
     slice_classes_all: list[np.ndarray] = []
@@ -1238,7 +1263,9 @@ def benchmark_split(
         if measure_latency:
             initial_state_latency.append(time.perf_counter() - initial_start)
 
-        full_predictions = _full_predictions(det, infer_cfg)
+        full_predictions = _full_predictions(
+            det, infer_cfg, image_path=image_path, crop_model=crop_model, model=model
+        )
 
         start = time.perf_counter()
         predictions["yolo_full"][image_id] = full_predictions

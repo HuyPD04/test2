@@ -488,16 +488,34 @@ def _infer_with_loaded(
     slice_classes_all: list[np.ndarray] = []
     slice_meta: list[dict] = []
 
-    full_mask = det.scores >= cfg.output_conf
-    full_boxes = det.boxes[full_mask]
-    full_scores = det.scores[full_mask]
-    full_classes = cfg.class_mapping.map_model_classes(det.classes[full_mask])
-    full_boxes, full_scores, full_classes = _filter_classes(
-        full_boxes,
-        full_scores,
-        full_classes,
-        cfg.target_classes,
-    )
+    if yolo is not crop_yolo:
+        from rl_sahi.inference.crops import run_yolo_on_crops
+        full_preds = run_yolo_on_crops(
+            crop_yolo,
+            [image_path],
+            [np.array([0, 0, det.image_shape[1], det.image_shape[0]], dtype=np.float32)],
+            imgsz=cfg.full_imgsz,
+            conf=cfg.output_conf,
+            iou=cfg.iou,
+            max_det=cfg.max_det,
+            device=cfg.device,
+        )[0]
+        full_boxes, full_scores, full_classes = full_preds
+        full_classes = cfg.class_mapping.map_model_classes(full_classes)
+        full_boxes, full_scores, full_classes = _filter_classes(
+            full_boxes, full_scores, full_classes, cfg.target_classes
+        )
+    else:
+        full_mask = det.scores >= cfg.output_conf
+        full_boxes = det.boxes[full_mask]
+        full_scores = det.scores[full_mask]
+        full_classes = cfg.class_mapping.map_model_classes(det.classes[full_mask])
+        full_boxes, full_scores, full_classes = _filter_classes(
+            full_boxes,
+            full_scores,
+            full_classes,
+            cfg.target_classes,
+        )
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
     crop_batch_size = max(int(cfg.crop_batch_size), 1)
     crop_prediction_count = 0
