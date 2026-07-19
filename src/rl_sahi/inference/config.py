@@ -33,4 +33,9 @@ class InferenceConfig:
     save_visualization: bool = False
     batched_inference: bool = False
     use_wbf: bool = False
+    # SAHI-style postprocessing (takes precedence over use_wbf when set)
+    postprocess_type: str = "GREEDYNMM"  # NMS | GREEDYNMM | WBF
+    postprocess_match_metric: str = "IOS"  # IOU | IOS
+    postprocess_match_threshold: float = 0.5
     class_mapping: ClassMapping = field(default_factory=ClassMapping)
+

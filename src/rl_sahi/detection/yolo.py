@@ -102,7 +102,9 @@ class LegacyYOLOWrapper:
             else:
                 raise TypeError(f"Unsupported source type: {type(s)}")
             original_shapes.append(img0.shape[:2])
-            img = letterbox(img0, imgsz, stride=self.stride, auto=False)[0]
+            # auto=True for single image (rectangular inference, matches training);
+            # auto=False for batch (all images must be same padded size).
+            img = letterbox(img0, imgsz, stride=self.stride, auto=(len(sources) == 1))[0]
             img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             img = np.ascontiguousarray(img)
             images_rgb.append(img)

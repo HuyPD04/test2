@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from rl_sahi.common.boxes import clip_boxes, iou_matrix, nms_numpy
+from rl_sahi.common.greedy_nmm import greedy_nmm
 from rl_sahi.common.wbf import weighted_box_fusion
 
 
@@ -41,6 +42,9 @@ def merge_predictions(
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
     use_wbf: bool = False,
+    postprocess_type: str | None = None,
+    postprocess_match_metric: str = "IOS",
+    postprocess_match_threshold: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -51,9 +55,22 @@ def merge_predictions(
     if len(boxes) == 0:
         return boxes, scores, classes
     boxes = clip_boxes(boxes, image_shape)
-    if use_wbf:
-        return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
-    keep = class_aware_nms(boxes, scores, classes, merge_iou)
+
+    # Resolve postprocess strategy
+    threshold = float(postprocess_match_threshold if postprocess_match_threshold is not None else merge_iou)
+    if postprocess_type is None:
+        # Legacy path: honour use_wbf flag
+        postprocess_type = "WBF" if use_wbf else "NMS"
+
+    pp = postprocess_type.upper()
+    if pp == "WBF":
+        return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=threshold)
+    if pp == "GREEDYNMM":
+        return greedy_nmm(boxes, scores, classes,
+                          match_metric=postprocess_match_metric.upper(),
+                          match_threshold=threshold)
+    # Default: NMS
+    keep = class_aware_nms(boxes, scores, classes, threshold)
     return boxes[keep], scores[keep], classes[keep]
 
 

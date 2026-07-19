@@ -42,6 +42,22 @@ def ioa_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return (inter / np.maximum(area_b, EPS)).astype(np.float32)
 
 
+def ios_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Intersection over Smaller area — the SAHI default match metric.
+
+    For each pair (a_i, b_j), computes intersection / min(area_a_i, area_b_j).
+    This is more appropriate than IoU for sliced inference because a small
+    object fully inside a larger detection still gets a high score.
+    """
+    inter = intersection_matrix(a, b)
+    if inter.size == 0:
+        return inter
+    area_a = area(a)[:, None]
+    area_b = area(b)[None, :]
+    smaller = np.minimum(area_a, area_b)
+    return (inter / np.maximum(smaller, EPS)).astype(np.float32)
+
+
 def centers(boxes: np.ndarray) -> np.ndarray:
     boxes = as_boxes(boxes)
     if boxes.size == 0:

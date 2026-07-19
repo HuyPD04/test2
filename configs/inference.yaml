@@ -20,7 +20,11 @@ infer:
   save_metadata: true
   save_visualization: false
   batched_inference: true
-  use_wbf: true
+  use_wbf: false
+  # SAHI-style post-processing (replaces use_wbf)
+  postprocess_type: "GREEDYNMM"       # NMS | GREEDYNMM | WBF
+  postprocess_match_metric: "IOS"      # IOU | IOS
+  postprocess_match_threshold: 0.5
   device: "cuda"
   policy_device: "cuda"
   feature_layers:
