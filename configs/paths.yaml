@@ -1,12 +1,9 @@
 paths:
-  weights: yolo11s.pt
-  crop_weights: tph-yolov5.pt
+  weights: yolo11s_old.pt
+  crop_weights: yolo11s_old.pt
   image_root: data/raw/images
   label_root: data/raw/labels
   cache_root: data/cache
   dqn_out_dir: runs/dqn
   infer_out_dir: runs/infer
-  checkpoint: runs/dqn/best.pt
-  query_dqn_out_dir: runs/query_rl
-  query_infer_out_dir: runs/query_infer
-  query_checkpoint: runs/query_rl/best.pt
+  checkpoint: runs/dqn/best_old.pt

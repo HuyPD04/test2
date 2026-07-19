@@ -878,7 +878,7 @@ def _infer_with_loaded(
     if cfg.save_predictions:
         save_prediction_txt(pred_path, boxes, scores, classes, sources)
     if cfg.save_visualization:
-        save_inference_visual(image_path, boxes, sources, accepted_rois_array, rejected_rois_array, viz_path)
+        save_inference_visual(image_path, boxes, sources, classes, accepted_rois_array, rejected_rois_array, viz_path)
     timing["write_outputs_ms"] = (time.perf_counter() - write_start) * 1000.0
     timing["total_ms"] = (time.perf_counter() - request_start) * 1000.0
     meta = {
