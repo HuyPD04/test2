@@ -20,7 +20,6 @@ from rl_sahi.detection.yolo import load_yolo
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.inference.crops import run_yolo_on_crops
 from rl_sahi.inference.merge import class_aware_nms
-from rl_sahi.common.greedy_nmm import greedy_nmm
 from rl_sahi.common.wbf import weighted_box_fusion
 from rl_sahi.inference.pipeline import (
     _crop_rejection_reason,
@@ -213,9 +212,6 @@ def _merge_predictions(
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
     use_wbf: bool = False,
-    postprocess_type: str | None = None,
-    postprocess_match_metric: str = "IOS",
-    postprocess_match_threshold: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -223,18 +219,9 @@ def _merge_predictions(
     if len(boxes) == 0:
         return _empty_preds()
     boxes = clip_boxes(boxes, image_shape)
-
-    threshold = float(postprocess_match_threshold if postprocess_match_threshold is not None else merge_iou)
-    if postprocess_type is None:
-        postprocess_type = "WBF" if use_wbf else "NMS"
-    pp = postprocess_type.upper()
-    if pp == "WBF":
-        return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=threshold)
-    if pp == "GREEDYNMM":
-        return greedy_nmm(boxes, scores, classes,
-                          match_metric=postprocess_match_metric.upper(),
-                          match_threshold=threshold)
-    keep = class_aware_nms(boxes, scores, classes, threshold)
+    if use_wbf:
+        return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
+    keep = class_aware_nms(boxes, scores, classes, merge_iou)
     return boxes[keep], scores[keep], classes[keep]
 
 
@@ -517,7 +504,7 @@ def _predict_from_crop_predictions(
         scores_parts.append(scores_i)
         classes_parts.append(classes_i)
         accepted_count += 1
-    boxes, scores, classes = _merge_predictions(det.image_shape, cfg.merge_iou, boxes_parts, scores_parts, classes_parts, use_wbf=cfg.use_wbf, postprocess_type=cfg.postprocess_type, postprocess_match_metric=cfg.postprocess_match_metric, postprocess_match_threshold=cfg.postprocess_match_threshold)
+    boxes, scores, classes = _merge_predictions(det.image_shape, cfg.merge_iou, boxes_parts, scores_parts, classes_parts, use_wbf=cfg.use_wbf)
     return boxes, scores, classes, accepted_count, len(selected_indices)
 
 
@@ -670,9 +657,6 @@ def _predict_rl_sahi(
             [full_scores, *slice_scores_all],
             [full_classes, *slice_classes_all],
             use_wbf=cfg.use_wbf,
-            postprocess_type=cfg.postprocess_type,
-            postprocess_match_metric=cfg.postprocess_match_metric,
-            postprocess_match_threshold=cfg.postprocess_match_threshold,
         )
         return boxes, scores, classes, len(accepted_rois), crop_inference_count
 
@@ -782,9 +766,6 @@ def _predict_rl_sahi(
         [full_scores, *slice_scores_all],
         [full_classes, *slice_classes_all],
         use_wbf=cfg.use_wbf,
-        postprocess_type=cfg.postprocess_type,
-        postprocess_match_metric=cfg.postprocess_match_metric,
-        postprocess_match_threshold=cfg.postprocess_match_threshold,
     )
     return boxes, scores, classes, len(accepted_rois), crop_inference_count
 

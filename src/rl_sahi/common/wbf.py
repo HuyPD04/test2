@@ -93,7 +93,7 @@ def weighted_box_fusion(
                 weights = member_scores / max(float(member_scores.sum()), 1e-9)
                 fused = (member_boxes * weights[:, None]).sum(axis=0)
                 cluster_boxes[matched_cluster] = fused
-                cluster_scores[matched_cluster] = float(member_scores.mean())
+                cluster_scores[matched_cluster] = float(member_scores.max())
             else:
                 # Create new cluster
                 clusters.append([idx])

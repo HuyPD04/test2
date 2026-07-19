@@ -845,48 +845,22 @@ def _infer_with_loaded(
 
     boxes = clip_boxes(boxes, det.image_shape)
 
-    # Resolve postprocess strategy (new fields take precedence over use_wbf)
-    pp_type = cfg.postprocess_type.upper()
-    if pp_type == "NMS" and cfg.use_wbf:
-        # Legacy backward compat: if postprocess_type was left default but
-        # use_wbf was explicitly True, honour the old flag.
-        pp_type = "WBF"
-    pp_threshold = float(cfg.postprocess_match_threshold)
-    pp_metric = cfg.postprocess_match_metric.upper()
-
-    if pp_type == "GREEDYNMM":
-        from rl_sahi.common.greedy_nmm import greedy_nmm as _greedy_nmm
-        orig_boxes = boxes.copy()
-        orig_sources = sources.copy()
-        boxes, scores, classes = _greedy_nmm(
-            boxes, scores, classes,
-            match_metric=pp_metric,
-            match_threshold=pp_threshold,
-        )
-        # Re-derive sources: for each merged box, find the closest original box
-        if len(boxes) > 0 and len(orig_boxes) > 0:
-            from rl_sahi.common.box_geometry import iou_matrix as _iou_matrix
-            match_ious = _iou_matrix(boxes, orig_boxes)
-            sources = orig_sources[match_ious.argmax(axis=1)]
-        else:
-            sources = np.zeros((len(boxes),), dtype=np.int32)
-    elif pp_type == "WBF":
-        orig_boxes = boxes.copy()
-        orig_sources = sources.copy()
+    if cfg.use_wbf:
         boxes, scores, classes = weighted_box_fusion(
-            [boxes], [scores], [classes], iou_threshold=pp_threshold,
+            [boxes], [scores], [classes], iou_threshold=cfg.merge_iou,
         )
         # Re-derive sources: for each fused box, find the closest original box
         # and assign its source.
+        orig_boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
+        orig_sources = sources.copy()
         if len(boxes) > 0 and len(orig_boxes) > 0:
             from rl_sahi.common.box_geometry import iou_matrix as _iou_matrix
-            match_ious = _iou_matrix(boxes, orig_boxes)
+            match_ious = _iou_matrix(boxes, clip_boxes(orig_boxes, det.image_shape))
             sources = orig_sources[match_ious.argmax(axis=1)]
         else:
             sources = np.zeros((len(boxes),), dtype=np.int32)
     else:
-        # NMS (legacy default)
-        keep = class_aware_nms(boxes, scores, classes, pp_threshold)
+        keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou)
         boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 
@@ -1093,9 +1067,6 @@ def infer_one_image(
             else _bool_value(batched_inference)
         ),
         use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
-        postprocess_type=str(infer_cfg.get("postprocess_type", "GREEDYNMM")),
-        postprocess_match_metric=str(infer_cfg.get("postprocess_match_metric", "IOS")),
-        postprocess_match_threshold=float(infer_cfg.get("postprocess_match_threshold", 0.5)),
         class_mapping=class_mapping or ClassMapping.from_config(project_cfg.section("classes")),
     )
     inferencer = AdaptiveSahiInferencer(weights=weights, checkpoint=checkpoint, cfg=cfg)
