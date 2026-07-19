@@ -1418,7 +1418,7 @@ def benchmark_split(
 
         start = time.perf_counter()
         boxes, scores, classes, accepted_crop_count, crop_count = _predict_rl_sahi(
-            model, policy, device_t, image_path, det, infer_cfg, env_cfg, state_cfg
+            model, crop_model, policy, device_t, image_path, det, infer_cfg, env_cfg, state_cfg
         )
         predictions["rl_sahi"][image_id] = (boxes, scores, classes)
         if measure_latency:
