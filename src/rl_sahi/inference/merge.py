@@ -22,13 +22,13 @@ def save_prediction_txt(
             f.write(f"{int(cls)} {float(score):.6f} {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {int(source)}\n")
 
 
-def class_aware_nms(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> np.ndarray:
+def class_aware_nms(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float, nms_type: str = "standard") -> np.ndarray:
     if len(boxes) == 0:
         return np.zeros((0,), dtype=np.int64)
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
         idx = np.flatnonzero(classes.astype(np.int64) == cls)
-        keep_local = nms_numpy(boxes[idx], scores[idx], iou_threshold)
+        keep_local = nms_numpy(boxes[idx], scores[idx], iou_threshold, nms_type=nms_type)
         keep_parts.append(idx[keep_local])
     keep = np.concatenate(keep_parts, axis=0) if keep_parts else np.zeros((0,), dtype=np.int64)
     return keep[np.argsort(scores[keep])[::-1]].astype(np.int64)
@@ -41,6 +41,7 @@ def merge_predictions(
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
     use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -53,7 +54,7 @@ def merge_predictions(
     boxes = clip_boxes(boxes, image_shape)
     if use_wbf:
         return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
-    keep = class_aware_nms(boxes, scores, classes, merge_iou)
+    keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
     return boxes[keep], scores[keep], classes[keep]
 
 

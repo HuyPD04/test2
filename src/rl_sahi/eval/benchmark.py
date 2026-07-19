@@ -212,6 +212,7 @@ def _merge_predictions(
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
     use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -221,7 +222,7 @@ def _merge_predictions(
     boxes = clip_boxes(boxes, image_shape)
     if use_wbf:
         return weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
-    keep = class_aware_nms(boxes, scores, classes, merge_iou)
+    keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
     return boxes[keep], scores[keep], classes[keep]
 
 
@@ -504,7 +505,7 @@ def _predict_from_crop_predictions(
         scores_parts.append(scores_i)
         classes_parts.append(classes_i)
         accepted_count += 1
-    boxes, scores, classes = _merge_predictions(det.image_shape, cfg.merge_iou, boxes_parts, scores_parts, classes_parts, use_wbf=cfg.use_wbf)
+    boxes, scores, classes = _merge_predictions(det.image_shape, cfg.merge_iou, boxes_parts, scores_parts, classes_parts, use_wbf=cfg.use_wbf, nms_type=cfg.nms_type)
     return boxes, scores, classes, accepted_count, len(selected_indices)
 
 
@@ -657,6 +658,7 @@ def _predict_rl_sahi(
             [full_scores, *slice_scores_all],
             [full_classes, *slice_classes_all],
             use_wbf=cfg.use_wbf,
+            nms_type=cfg.nms_type,
         )
         return boxes, scores, classes, len(accepted_rois), crop_inference_count
 
@@ -766,6 +768,7 @@ def _predict_rl_sahi(
         [full_scores, *slice_scores_all],
         [full_classes, *slice_classes_all],
         use_wbf=cfg.use_wbf,
+        nms_type=cfg.nms_type,
     )
     return boxes, scores, classes, len(accepted_rois), crop_inference_count
 

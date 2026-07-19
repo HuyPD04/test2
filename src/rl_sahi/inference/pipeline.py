@@ -860,7 +860,7 @@ def _infer_with_loaded(
         else:
             sources = np.zeros((len(boxes),), dtype=np.int32)
     else:
-        keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou)
+        keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou, nms_type=cfg.nms_type)
         boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 
@@ -1067,6 +1067,7 @@ def infer_one_image(
             else _bool_value(batched_inference)
         ),
         use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
+        nms_type=str(infer_cfg.get("nms_type", "standard")),
         class_mapping=class_mapping or ClassMapping.from_config(project_cfg.section("classes")),
     )
     inferencer = AdaptiveSahiInferencer(weights=weights, checkpoint=checkpoint, cfg=cfg)

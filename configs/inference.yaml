@@ -1,6 +1,6 @@
 infer:
-  full_imgsz: 1280
-  slice_imgsz: 640
+  full_imgsz: 640
+  slice_imgsz: 320
   full_conf: 0.01
   output_conf: 0.30
   iou: 0.7
@@ -20,7 +20,8 @@ infer:
   save_metadata: true
   save_visualization: false
   batched_inference: true
-  use_wbf: true
+  use_wbf: false
+  nms_type: "diou"
   device: "cuda"
   policy_device: "cuda"
   feature_layers:
