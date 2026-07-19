@@ -10,11 +10,11 @@ infer:
   min_slice_utility: 0.3
   min_new_detection_score: 0.1
   duplicate_iou: 0.5
-  max_slice_attempts: 12
+  max_slice_attempts: 4
   roi_prefilter_enabled: true
-  roi_prefilter_topk: 8
-  crop_batch_size: 4
-  max_consecutive_rejections: 3
+  roi_prefilter_topk: 3
+  crop_batch_size: 3
+  max_consecutive_rejections: 2
   require_stop_for_acceptance: false
   save_predictions: true
   save_metadata: true
