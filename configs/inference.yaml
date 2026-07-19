@@ -1,6 +1,6 @@
 infer:
   full_imgsz: 640
-  slice_imgsz: 320
+  slice_imgsz: 512
   full_conf: 0.01
   output_conf: 0.30
   iou: 0.7
@@ -10,11 +10,11 @@ infer:
   min_slice_utility: 0.3
   min_new_detection_score: 0.1
   duplicate_iou: 0.5
-  max_slice_attempts: 4
+  max_slice_attempts: 12
   roi_prefilter_enabled: true
-  roi_prefilter_topk: 3
-  crop_batch_size: 3
-  max_consecutive_rejections: 2
+  roi_prefilter_topk: 8
+  crop_batch_size: 4
+  max_consecutive_rejections: 3
   require_stop_for_acceptance: false
   save_predictions: true
   save_metadata: true
