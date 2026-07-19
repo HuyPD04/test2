@@ -10,10 +10,10 @@ infer:
   min_slice_utility: 0.3
   min_new_detection_score: 0.1
   duplicate_iou: 0.5
-  max_slice_attempts: 8
+  max_slice_attempts: 6
   roi_prefilter_enabled: true
-  roi_prefilter_topk: 8
-  crop_batch_size: 8
+  roi_prefilter_topk: 5
+  crop_batch_size: 5
   max_consecutive_rejections: 2
   require_stop_for_acceptance: false
   save_predictions: true
@@ -29,8 +29,8 @@ infer:
   use_cache: true
 
 benchmark:
-  output_conf: 0.01
-  iou_threshold: 0.5
+  output_conf: 0.10
+  iou_threshold: 0.35
   eval_max_detections: 500
   fixed_slice_fraction: 0.35
   fixed_overlap: 0.2
@@ -54,3 +54,16 @@ benchmark:
   small_area_percentile: null
   sampling: stratified
   seed: 42
+
+classes:
+  target_classes:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
