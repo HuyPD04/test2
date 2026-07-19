@@ -62,6 +62,7 @@ def main() -> None:
 
     rows = benchmark_split(
         weights=cfg.path_value("weights"),
+        crop_weights=cfg.path_value("crop_weights"),
         checkpoint=checkpoint,
         image_root=cfg.path_value("image_root"),
         label_root=cfg.path_value("label_root"),

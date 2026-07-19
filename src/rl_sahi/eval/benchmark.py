@@ -538,6 +538,7 @@ def _proposal_rois(
 
 def _predict_rl_sahi(
     model: YOLO,
+    crop_model: YOLO,
     policy,
     device_t: torch.device,
     image_path: Path,
@@ -717,7 +718,7 @@ def _predict_rl_sahi(
             continue
 
         predictions = run_yolo_on_crops(
-            model,
+            crop_model,
             [image_path] * len(pending),
             [roi for roi, _info in pending],
             imgsz=cfg.slice_imgsz,
@@ -1012,6 +1013,7 @@ def _evaluate_method(
 
 def evaluate_rl_sahi_policy(
     model: YOLO,
+    crop_model: YOLO,
     policy,
     device_t: torch.device,
     weights: Path,
@@ -1079,6 +1081,7 @@ def evaluate_rl_sahi_policy(
         start = time.perf_counter()
         boxes, scores, classes, accepted_crop_count, crop_count = _predict_rl_sahi(
             model,
+            crop_model,
             policy,
             device_t,
             image_path,
@@ -1120,6 +1123,7 @@ def benchmark_split(
     infer_cfg: InferenceConfig,
     bench_cfg: BenchmarkConfig,
     out_dir: Path,
+    crop_weights: Path | None = None,
     limit: int | None = None,
     use_cache: bool = True,
 ) -> list[dict[str, float | str]]:
@@ -1142,6 +1146,7 @@ def benchmark_split(
     small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
     detector_device_t = resolve_torch_device(infer_cfg.device)
     model = load_yolo(weights, device=detector_device_t)
+    crop_model = load_yolo(crop_weights, device=detector_device_t) if crop_weights else model
     sahi_model = (
         _load_sahi_detection_model(weights, bench_cfg, detector_device_t)
         if bench_cfg.include_sahi_library
@@ -1265,7 +1270,7 @@ def benchmark_split(
         if bench_cfg.include_fixed_grid_full:
             start = time.perf_counter()
             fixed_crop_predictions = run_yolo_on_crops(
-                model,
+                crop_model,
                 [image_path] * len(fixed_rois),
                 fixed_rois,
                 imgsz=infer_cfg.slice_imgsz,
@@ -1320,7 +1325,7 @@ def benchmark_split(
             selected_rois = [fixed_rois[idx] for idx in selected]
             start = time.perf_counter()
             crop_predictions = run_yolo_on_crops(
-                model,
+                crop_model,
                 [image_path] * len(selected_rois),
                 selected_rois,
                 imgsz=infer_cfg.slice_imgsz,
