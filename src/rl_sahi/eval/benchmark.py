@@ -1148,6 +1148,7 @@ def benchmark_split(
     cache_root: Path,
     split: str,
     infer_cfg: InferenceConfig,
+    bench_cfg: BenchmarkConfig,
     out_dir: Path,
     crop_weights: Path | None = None,
     full_weights: Path | None = None,
@@ -1170,6 +1171,7 @@ def benchmark_split(
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
+    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
     detector_device_t = resolve_torch_device(infer_cfg.device)
     model = load_yolo(weights, device=detector_device_t)
     full_model = load_yolo(full_weights, device=detector_device_t) if full_weights else model
@@ -1447,7 +1449,7 @@ def benchmark_split(
 
         start = time.perf_counter()
         boxes, scores, classes, accepted_crop_count, crop_count = _predict_rl_sahi(
-            model, crop_model, policy, device_t, image_path, det, infer_cfg, env_cfg, state_cfg
+            model, full_model, crop_model, policy, device_t, image_path, det, infer_cfg, env_cfg, state_cfg
         )
         predictions["rl_sahi"][image_id] = (boxes, scores, classes)
         if measure_latency:
