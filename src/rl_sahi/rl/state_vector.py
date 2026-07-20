@@ -25,36 +25,36 @@ def build_state_vector(
     spatial_feature_map: np.ndarray,
     summary: np.ndarray,
     static_ready: bool = False,
+    out_buffer: np.ndarray | None = None,
 ) -> np.ndarray:
     if static_ready:
-        feature_part = np.asarray(feature, dtype=np.float32).reshape(-1)
+        feature_part = np.asarray(feature, dtype=np.float32)
         objectness = np.asarray(objectness_map, dtype=np.float32)
         spatial = np.asarray(spatial_feature_map, dtype=np.float32)
     else:
         feature_part = normalize_feature(feature)
         objectness = np.nan_to_num(
             np.asarray(objectness_map, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
+            nan=0.0, posinf=0.0, neginf=0.0,
         )
         spatial = np.nan_to_num(
             np.asarray(spatial_feature_map, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
+            nan=0.0, posinf=0.0, neginf=0.0,
         )
-    return np.concatenate(
-        [
-            feature_part,
-            np.asarray(history, dtype=np.float32).reshape(-1),
-            np.asarray(current_roi_map, dtype=np.float32).reshape(-1),
-            np.asarray(attempted_slice_map, dtype=np.float32).reshape(-1),
-            np.asarray(accepted_slice_map, dtype=np.float32).reshape(-1),
-            np.asarray(detection_map, dtype=np.float32).reshape(-1),
-            objectness.reshape(-1),
-            spatial.reshape(-1),
-            np.asarray(summary, dtype=np.float32).reshape(-1),
-        ],
-        axis=0,
-    ).astype(np.float32)
+        
+    if out_buffer is None:
+        total_size = (
+            feature_part.size + history.size + current_roi_map.size +
+            attempted_slice_map.size + accepted_slice_map.size +
+            detection_map.size + objectness.size + spatial.size + summary.size
+        )
+        out_buffer = np.zeros(total_size, dtype=np.float32)
+
+    offset = 0
+    for arr in (feature_part, history, current_roi_map, attempted_slice_map, 
+                accepted_slice_map, detection_map, objectness, spatial, summary):
+        s = arr.size
+        out_buffer[offset : offset + s] = np.asarray(arr, dtype=np.float32).ravel()
+        offset += s
+
+    return out_buffer

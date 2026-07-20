@@ -8,8 +8,6 @@ from rl_sahi.rl.state_maps import proposal_mask, proposal_quality
 
 
 def detection_summary(
-    boxes: np.ndarray,
-    scores: np.ndarray,
     roi: np.ndarray,
     history: np.ndarray,
     previous_slice_map: np.ndarray,
@@ -20,43 +18,32 @@ def detection_summary(
     scale_gain: float,
     previous_slice_count: int,
     cfg: StateConfig,
+    # cached properties:
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    summary_static: np.ndarray,
+    boxes_area: np.ndarray,
+    prop_mask: np.ndarray,
+    prop_quality: np.ndarray,
+    small_mask: np.ndarray,
+    low_mask: np.ndarray,
 ) -> np.ndarray:
-    boxes = as_boxes(boxes)
-    scores = np.asarray(scores, dtype=np.float32).reshape(-1)
-    valid_mask = scores >= cfg.proposal_min_conf
-    boxes = boxes[valid_mask]
-    scores = scores[valid_mask]
+    summary = summary_static.copy()
     image_area = float(image_shape[0] * image_shape[1])
-    summary = np.zeros((SUMMARY_DIM,), dtype=np.float32)
 
     if len(boxes) > 0:
-        areas = area(boxes) / max(image_area, 1.0)
-        low_mask = scores < cfg.low_conf_threshold
-        prop_mask = proposal_mask(scores, cfg)
-        prop_quality = proposal_quality(scores, cfg)
-        small_mask = areas <= cfg.small_area_ratio
-        summary[0] = min(len(boxes) / cfg.count_norm, 1.0)
-        summary[1] = float(scores.mean())
-        summary[2] = float(scores.max())
-        summary[3] = min(float(low_mask.sum()) / cfg.count_norm, 1.0)
-        summary[4] = min(float(small_mask.sum()) / cfg.count_norm, 1.0)
-        summary[5] = float(np.clip(areas.mean(), 0.0, 1.0))
-        summary[24] = min(float(prop_mask.sum()) / cfg.count_norm, 1.0)
-        if prop_mask.any():
-            summary[26] = float(prop_quality[prop_mask].mean())
-
         inter = intersection_matrix(np.asarray(roi, dtype=np.float32).reshape(1, 4), boxes)[0]
         in_roi = inter > 0.0
         if in_roi.any():
             roi_scores = scores[in_roi]
-            roi_areas = areas[in_roi]
+            roi_areas = boxes_area[in_roi]
             roi_prop_mask = prop_mask[in_roi]
             roi_prop_quality = prop_quality[in_roi]
             summary[6] = min(float(in_roi.sum()) / cfg.roi_count_norm, 1.0)
             summary[7] = float(roi_scores.mean())
             summary[8] = float(roi_scores.max())
-            summary[9] = min(float((roi_scores < cfg.low_conf_threshold).sum()) / cfg.roi_count_norm, 1.0)
-            summary[10] = min(float((roi_areas <= cfg.small_area_ratio).sum()) / cfg.roi_count_norm, 1.0)
+            summary[9] = min(float(low_mask[in_roi].sum()) / cfg.roi_count_norm, 1.0)
+            summary[10] = min(float(small_mask[in_roi].sum()) / cfg.roi_count_norm, 1.0)
             roi_area = max(float(area(np.asarray(roi).reshape(1, 4))[0]), 1.0)
             summary[11] = float(np.clip(inter[in_roi].sum() / roi_area, 0.0, 1.0))
             summary[25] = min(float(roi_prop_mask.sum()) / cfg.roi_count_norm, 1.0)

@@ -36,6 +36,14 @@ class SliceEnvStaticContext:
     feature_state: np.ndarray
     objectness_state: np.ndarray
     spatial_feature_state: np.ndarray
+    state_boxes: np.ndarray
+    state_scores: np.ndarray
+    state_summary_static: np.ndarray
+    state_boxes_area: np.ndarray
+    state_prop_mask: np.ndarray
+    state_prop_quality: np.ndarray
+    state_small_mask: np.ndarray
+    state_low_mask: np.ndarray
 
 
 class SliceEnv:
@@ -72,6 +80,16 @@ class SliceEnv:
         self.feature_state = static.feature_state
         self.objectness_state = static.objectness_state
         self.spatial_feature_state = static.spatial_feature_state
+        
+        self.state_boxes = static.state_boxes
+        self.state_scores = static.state_scores
+        self.state_summary_static = static.state_summary_static
+        self.state_boxes_area = static.state_boxes_area
+        self.state_prop_mask = static.state_prop_mask
+        self.state_prop_quality = static.state_prop_quality
+        self.state_small_mask = static.state_small_mask
+        self.state_low_mask = static.state_low_mask
+
         self.hard_boxes = as_boxes(hard_regions.hard_boxes if hard_regions is not None else np.zeros((0, 4)))
         self.previous_rois = as_boxes(previous_rois if previous_rois is not None else np.zeros((0, 4), dtype=np.float32))
         self.overlap_rois = as_boxes(overlap_rois if overlap_rois is not None else self.previous_rois)
@@ -88,6 +106,8 @@ class SliceEnv:
         self.covered = self.previous_covered.copy()
         self.roi = self._initial_roi()
         self.step_index = 0
+        self._state_buffer = None
+        self._state_buffer = self._state()
 
     @staticmethod
     def build_static_context(
@@ -103,6 +123,38 @@ class SliceEnv:
             target = np.asarray(target_classes, dtype=np.int64)
             mask = np.isin(classes.astype(np.int64), target)
             boxes, scores, classes = boxes[mask], scores[mask], classes[mask]
+            
+        state_valid_mask = scores >= state_cfg.proposal_min_conf
+        state_boxes = boxes[state_valid_mask]
+        state_scores = scores[state_valid_mask]
+        
+        image_area = float(detection.image_shape[0] * detection.image_shape[1])
+        from rl_sahi.rl.state_config import SUMMARY_DIM
+        summary_static = np.zeros((SUMMARY_DIM,), dtype=np.float32)
+        
+        if len(state_boxes) > 0:
+            boxes_area = area(state_boxes) / max(image_area, 1.0)
+            low_mask = state_scores < state_cfg.low_conf_threshold
+            p_mask = proposal_mask(state_scores, state_cfg)
+            p_quality = proposal_quality(state_scores, state_cfg)
+            small_mask = boxes_area <= state_cfg.small_area_ratio
+            
+            summary_static[0] = min(len(state_boxes) / state_cfg.count_norm, 1.0)
+            summary_static[1] = float(state_scores.mean())
+            summary_static[2] = float(state_scores.max())
+            summary_static[3] = min(float(low_mask.sum()) / state_cfg.count_norm, 1.0)
+            summary_static[4] = min(float(small_mask.sum()) / state_cfg.count_norm, 1.0)
+            summary_static[5] = float(np.clip(boxes_area.mean(), 0.0, 1.0))
+            summary_static[24] = min(float(p_mask.sum()) / state_cfg.count_norm, 1.0)
+            if p_mask.any():
+                summary_static[26] = float(p_quality[p_mask].mean())
+        else:
+            boxes_area = np.zeros((0,), dtype=np.float32)
+            low_mask = np.zeros((0,), dtype=bool)
+            p_mask = np.zeros((0,), dtype=bool)
+            p_quality = np.zeros((0,), dtype=np.float32)
+            small_mask = np.zeros((0,), dtype=bool)
+
         return SliceEnvStaticContext(
             det_boxes=boxes,
             det_scores=scores,
@@ -121,6 +173,14 @@ class SliceEnv:
                 posinf=0.0,
                 neginf=0.0,
             ),
+            state_boxes=state_boxes,
+            state_scores=state_scores,
+            state_summary_static=summary_static,
+            state_boxes_area=boxes_area,
+            state_prop_mask=p_mask,
+            state_prop_quality=p_quality,
+            state_small_mask=small_mask,
+            state_low_mask=low_mask,
         )
 
     def _resolve_box_device(self) -> torch.device | None:
@@ -851,8 +911,6 @@ class SliceEnv:
 
     def _state(self) -> np.ndarray:
         summary = detection_summary(
-            boxes=self.det_boxes,
-            scores=self.det_scores,
             roi=self.roi,
             history=self.history,
             previous_slice_map=self.previous_slice_map,
@@ -863,13 +921,19 @@ class SliceEnv:
             scale_gain=self._scale_gain(),
             previous_slice_count=len(self.previous_rois),
             cfg=self.state_cfg,
+            boxes=self.state_boxes,
+            scores=self.state_scores,
+            summary_static=self.state_summary_static,
+            boxes_area=self.state_boxes_area,
+            prop_mask=self.state_prop_mask,
+            prop_quality=self.state_prop_quality,
+            small_mask=self.state_small_mask,
+            low_mask=self.state_low_mask,
         )
         if not self.state_cfg.use_detector_cues:
-            summary = summary.copy()
             summary[0:12] = 0.0
             summary[24:28] = 0.0
         if not self.state_cfg.use_history:
-            summary = summary.copy()
             summary[[18, 20, 21, 23]] = 0.0
 
         zeros_grid = np.zeros((self.state_cfg.grid_size, self.state_cfg.grid_size), dtype=np.float32)
@@ -901,7 +965,8 @@ class SliceEnv:
             objectness_state,
             spatial_feature_state,
             summary,
-            static_ready=True,
+            True,
+            self._state_buffer,
         )
 
     def _update_covered(self, commit: bool = True) -> tuple[np.ndarray, np.ndarray]:
