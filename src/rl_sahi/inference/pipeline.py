@@ -354,7 +354,7 @@ def get_initial_detection(
 
 
 class AdaptiveSahiInferencer:
-    def __init__(self, weights: Path, checkpoint: Path, cfg: InferenceConfig, crop_weights: Path | None = None) -> None:
+    def __init__(self, weights: Path, checkpoint: Path, cfg: InferenceConfig, crop_weights: Path | None = None, full_weights: Path | None = None) -> None:
         self.cfg = cfg
         self.device_t = resolve_torch_device(cfg.policy_device or cfg.device)
         self.yolo_device_t = resolve_torch_device(cfg.device)
@@ -377,13 +377,16 @@ class AdaptiveSahiInferencer:
             )
         self.weights = Path(weights)
         self.crop_weights = Path(crop_weights) if crop_weights else None
+        self.full_weights = Path(full_weights) if full_weights else None
         self.provenance = {
             "weights": file_fingerprint(Path(weights)),
             "crop_weights": file_fingerprint(Path(crop_weights)) if crop_weights else None,
+            "full_weights": file_fingerprint(Path(full_weights)) if full_weights else None,
             "checkpoint": file_fingerprint(Path(checkpoint)),
             "inference_config": asdict(cfg),
         }
         self.yolo = load_yolo(weights, device=self.yolo_device_t)
+        self.full_yolo = load_yolo(full_weights, device=self.yolo_device_t) if full_weights else self.yolo
         self.crop_yolo = load_yolo(crop_weights, device=self.yolo_device_t) if crop_weights else self.yolo
 
     def infer_image(
@@ -425,6 +428,7 @@ class AdaptiveSahiInferencer:
             image_path=image_path,
             out_dir=out_dir,
             yolo=self.yolo,
+            full_yolo=self.full_yolo,
             crop_yolo=self.crop_yolo,
             policy=self.policy,
             device_t=self.device_t,
@@ -444,6 +448,7 @@ def _infer_with_loaded(
     image_path: Path,
     out_dir: Path,
     yolo: YOLO,
+    full_yolo: YOLO,
     crop_yolo: YOLO,
     policy,
     device_t: torch.device,
@@ -488,10 +493,10 @@ def _infer_with_loaded(
     slice_classes_all: list[np.ndarray] = []
     slice_meta: list[dict] = []
 
-    if yolo is not crop_yolo:
+    if full_yolo is not yolo:
         from rl_sahi.inference.crops import run_yolo_on_crops
         full_preds = run_yolo_on_crops(
-            crop_yolo,
+            full_yolo,
             [image_path],
             [np.array([0, 0, det.image_shape[1], det.image_shape[0]], dtype=np.float32)],
             imgsz=cfg.full_imgsz,

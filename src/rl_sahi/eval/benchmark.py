@@ -230,14 +230,14 @@ def _full_predictions(
     det: DetectionCache, 
     cfg: InferenceConfig,
     image_path: Path | None = None,
-    crop_model=None,
+    full_model=None,
     model=None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if model is not None and crop_model is not None and model is not crop_model and image_path is not None:
+    if model is not None and full_model is not None and model is not full_model and image_path is not None:
         from rl_sahi.inference.crops import run_yolo_on_crops
         import numpy as np
         full_preds = run_yolo_on_crops(
-            crop_model,
+            full_model,
             [image_path],
             [np.array([0, 0, det.image_shape[1], det.image_shape[0]], dtype=np.float32)],
             imgsz=cfg.full_imgsz,
@@ -561,6 +561,7 @@ def _proposal_rois(
 
 def _predict_rl_sahi(
     model: YOLO,
+    full_model: YOLO,
     crop_model: YOLO,
     policy,
     device_t: torch.device,
@@ -578,7 +579,7 @@ def _predict_rl_sahi(
         cfg.class_mapping,
     )
     full_boxes, full_scores, full_classes = _full_predictions(
-        det, cfg, image_path=image_path, crop_model=crop_model, model=model
+        det, cfg, image_path=image_path, full_model=full_model, model=model
     )
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
@@ -1038,6 +1039,7 @@ def _evaluate_method(
 
 def evaluate_rl_sahi_policy(
     model: YOLO,
+    full_model: YOLO,
     crop_model: YOLO,
     policy,
     device_t: torch.device,
@@ -1146,9 +1148,9 @@ def benchmark_split(
     cache_root: Path,
     split: str,
     infer_cfg: InferenceConfig,
-    bench_cfg: BenchmarkConfig,
     out_dir: Path,
     crop_weights: Path | None = None,
+    full_weights: Path | None = None,
     limit: int | None = None,
     use_cache: bool = True,
 ) -> list[dict[str, float | str]]:
@@ -1168,9 +1170,9 @@ def benchmark_split(
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
-    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
     detector_device_t = resolve_torch_device(infer_cfg.device)
     model = load_yolo(weights, device=detector_device_t)
+    full_model = load_yolo(full_weights, device=detector_device_t) if full_weights else model
     crop_model = load_yolo(crop_weights, device=detector_device_t) if crop_weights else model
     sahi_model = (
         _load_sahi_detection_model(weights, bench_cfg, detector_device_t)
@@ -1264,7 +1266,7 @@ def benchmark_split(
             initial_state_latency.append(time.perf_counter() - initial_start)
 
         full_predictions = _full_predictions(
-            det, infer_cfg, image_path=image_path, crop_model=crop_model, model=model
+            det, infer_cfg, image_path=image_path, full_model=full_model, model=model
         )
 
         start = time.perf_counter()

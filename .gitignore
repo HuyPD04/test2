@@ -17,3 +17,5 @@ data/
 *.json
 
 papers/
+
+tph-yolov5l.pt

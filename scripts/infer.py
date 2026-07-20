@@ -67,11 +67,16 @@ def main() -> None:
         crop_weights = cfg.path_value("crop_weights")
     except KeyError:
         crop_weights = None
+    try:
+        full_weights = cfg.path_value("full_weights")
+    except KeyError:
+        full_weights = None
 
     inferencer = AdaptiveSahiInferencer(
         weights=cfg.path_value("weights"),
         checkpoint=checkpoint,
         crop_weights=crop_weights,
+        full_weights=full_weights,
         cfg=InferenceConfig(
             full_imgsz=int(infer_cfg["full_imgsz"]),
             slice_imgsz=int(infer_cfg["slice_imgsz"]),

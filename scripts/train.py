@@ -168,6 +168,8 @@ def main() -> None:
         class_mapping=class_mapping,
         label_root=cfg.path_value("label_root"),
         eval_weights=cfg.path_value("weights"),
+        eval_full_weights=full_weights,
+        eval_crop_weights=crop_weights,
         infer_cfg=InferenceConfig(
             full_imgsz=int(infer_cfg["full_imgsz"]),
             slice_imgsz=int(infer_cfg["slice_imgsz"]),

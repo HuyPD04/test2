@@ -176,7 +176,8 @@ def batched_train_dqn(
     limit: int | None = None, device_name: str | None = None, detection_metadata: dict[str, Any] | None = None,
     hard_region_metadata: dict[str, Any] | None = None,
     target_classes: tuple[int, ...] = (), class_mapping: ClassMapping | None = None, label_root: Path | None = None,
-    eval_weights: Path | None = None, infer_cfg: InferenceConfig | None = None, bench_cfg: BenchmarkConfig | None = None,
+    eval_weights: Path | None = None, eval_full_weights: Path | None = None, eval_crop_weights: Path | None = None,
+    infer_cfg: InferenceConfig | None = None, bench_cfg: BenchmarkConfig | None = None,
     eval_use_cache: bool = True,
 ) -> Path:
     random.seed(cfg.seed)
@@ -204,6 +205,8 @@ def batched_train_dqn(
 
     inference_model = None
     benchmark_model = None
+    benchmark_full_model = None
+    benchmark_crop_model = None
     benchmark_images: list[Path] = []
     if getattr(cfg, "eval_benchmark_images", 0) > 0:
         if eval_weights is None or label_root is None or infer_cfg is None or bench_cfg is None:
@@ -218,6 +221,14 @@ def batched_train_dqn(
             raise FileNotFoundError(f"No images found for benchmark validation split '{cfg.val_split}'")
         inference_model = load_yolo(eval_weights, device=infer_cfg.device)
         benchmark_model = inference_model
+        if eval_full_weights is not None:
+            benchmark_full_model = load_yolo(eval_full_weights, device=infer_cfg.device)
+        else:
+            benchmark_full_model = inference_model
+        if eval_crop_weights is not None:
+            benchmark_crop_model = load_yolo(eval_crop_weights, device=infer_cfg.device)
+        else:
+            benchmark_crop_model = inference_model
     elif cfg.use_crop_outcome_reward:
         if eval_weights is None or infer_cfg is None:
             raise RuntimeError("Crop outcome reward requires eval_weights and inference config")
@@ -642,9 +653,11 @@ def batched_train_dqn(
                                 row["val_slices"] = round(metrics["val_slices"], 6)
                                 row["val_score"] = round(metrics["val_score"], 6)
                                 selected_score = metrics["val_score"]
-                            if benchmark_model is not None and infer_cfg is not None and bench_cfg is not None and label_root is not None:
+                            if benchmark_model is not None and benchmark_full_model is not None and benchmark_crop_model is not None and infer_cfg is not None and bench_cfg is not None and label_root is not None:
                                 bench_metrics = evaluate_rl_sahi_policy(
                                     model=benchmark_model,
+                                    full_model=benchmark_full_model,
+                                    crop_model=benchmark_crop_model,
                                     policy=policy,
                                     device_t=device,
                                     weights=eval_weights,

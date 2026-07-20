@@ -60,9 +60,19 @@ def main() -> None:
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
 
+    try:
+        crop_weights = cfg.path_value("crop_weights")
+    except KeyError:
+        crop_weights = None
+    try:
+        full_weights = cfg.path_value("full_weights")
+    except KeyError:
+        full_weights = None
+
     rows = benchmark_split(
         weights=cfg.path_value("weights"),
-        crop_weights=cfg.path_value("crop_weights"),
+        crop_weights=crop_weights,
+        full_weights=full_weights,
         checkpoint=checkpoint,
         image_root=cfg.path_value("image_root"),
         label_root=cfg.path_value("label_root"),

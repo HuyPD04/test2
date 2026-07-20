@@ -137,6 +137,9 @@ class LegacyYOLOWrapper:
         return results
 
 def load_yolo(weights: Path, device: DeviceLike = None):
+    if "tph" in str(weights).lower() or "yolov5" in str(weights).lower():
+        # Force use Legacy wrapper for TPH-YOLOv5 models
+        return LegacyYOLOWrapper(weights, device)
     try:
         model = YOLO(str(weights))
         resolved_device = configure_torch_runtime(device)
@@ -144,9 +147,8 @@ def load_yolo(weights: Path, device: DeviceLike = None):
         model.to(resolved_device)
         return model
     except Exception as e:
-        if "NOT forwards compatible" in str(e) or "originally trained with" in str(e):
-            return LegacyYOLOWrapper(weights, device)
-        raise
+        # Fallback to Legacy wrapper for any loading error that suggests it's not a v8 model
+        return LegacyYOLOWrapper(weights, device)
 
 
 def detect_one_image(
