@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 
-model = YOLO("yolo11s.pt")
-results = model(r"data\raw\images\test\0000006_00611_d_0000002.jpg")
+model = YOLO("yolo11m.pt")
+results = model(r"data\raw\images\test\0000006_04050_d_0000010.jpg")
 for result in results:
     boxes = result.boxes  # Boxes object for bounding box outputs
     masks = result.masks  # Masks object for segmentation masks outputs

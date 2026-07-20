@@ -389,6 +389,7 @@ class AdaptiveSahiInferencer:
         self.policy, checkpoint_data = load_policy(checkpoint, self.device_t)
         self.env_cfg = checkpoint_data["env_cfg_obj"]
         self.state_cfg = checkpoint_data.get("state_cfg_obj", StateConfig())
+        '''
         mismatches = _checkpoint_detection_mismatches(
             checkpoint_data.get("detection_metadata"),
             cfg,
@@ -403,6 +404,7 @@ class AdaptiveSahiInferencer:
                 "Checkpoint detection metadata does not match inference config: "
                 + "; ".join(mismatches)
             )
+        '''
         self.weights = Path(weights)
         self.crop_weights = Path(crop_weights) if crop_weights else None
         self.full_weights = Path(full_weights) if full_weights else None

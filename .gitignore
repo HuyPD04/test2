@@ -20,3 +20,6 @@ papers/
 
 tph-yolov5l.pt
 tph-best.pt
+visualizations/
+detections/
+metadata/

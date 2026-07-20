@@ -265,23 +265,57 @@ class SliceEnv:
             ) * 1000.0
         return StepResult(state, 0.0, done, info)
 
+    def _apply_all_non_stop_actions(self) -> np.ndarray:
+        side = self._roi_side()
+        step = side * self.env_cfg.move_fraction
+        diag_step = step / float(np.sqrt(2.0))
+        
+        dx = np.array([-step, step, 0, 0, 0, 0, -diag_step, diag_step, -diag_step, diag_step], dtype=np.float32)
+        dy = np.array([0, 0, -step, step, 0, 0, -diag_step, -diag_step, diag_step, diag_step], dtype=np.float32)
+        zoom = np.array([1, 1, 1, 1, self.env_cfg.zoom_factor, 1.0 / max(self.env_cfg.zoom_factor, 1e-6), 1, 1, 1, 1], dtype=np.float32)
+        
+        x1, y1, x2, y2 = self.roi
+        cx = (x1 + x2) / 2.0 + dx
+        cy = (y1 + y2) / 2.0 + dy
+        w = (x2 - x1) * zoom
+        h = (y2 - y1) * zoom
+        
+        min_side, max_side = self._side_limits()
+        w = np.clip(w, min_side, max_side)
+        h = np.clip(h, min_side, max_side)
+        
+        new_rois = np.stack([
+            cx - w / 2.0,
+            cy - h / 2.0,
+            cx + w / 2.0,
+            cy + h / 2.0
+        ], axis=1)
+        
+        image_h, image_w = self.image_shape
+        new_rois[:, 0] = np.clip(new_rois[:, 0], 0, image_w)
+        new_rois[:, 1] = np.clip(new_rois[:, 1], 0, image_h)
+        new_rois[:, 2] = np.clip(new_rois[:, 2], 0, image_w)
+        new_rois[:, 3] = np.clip(new_rois[:, 3], 0, image_h)
+        
+        return new_rois
+
     def valid_actions(self) -> np.ndarray:
         valid = np.ones((NUM_ACTIONS,), dtype=bool)
         non_stop_actions = [action for action in Action if action != Action.STOP]
-        next_rois = np.stack([self._apply_action(action) for action in non_stop_actions]).astype(np.float32)
+        non_stop_indices = [int(a) for a in non_stop_actions]
+        
+        next_rois = self._apply_all_non_stop_actions()
         stalled = np.all(np.isclose(next_rois, self.roi.reshape(1, 4), atol=1e-3), axis=1)
+        
         old_overlaps = self._old_slice_overlaps(next_rois)
         attempted_overlaps = self._attempted_slice_overlaps(next_rois)
         next_overlaps = np.maximum(old_overlaps, attempted_overlaps)
-        for idx, action in enumerate(non_stop_actions):
-            if stalled[idx]:
-                valid[int(action)] = False
-        if np.any((~stalled) & (next_overlaps < self.env_cfg.old_slice_overlap_threshold)):
-            for idx, action in enumerate(non_stop_actions):
-                if next_overlaps[idx] >= self.env_cfg.old_slice_overlap_threshold:
-                    valid[int(action)] = False
+        
+        valid_mask = (~stalled) & (next_overlaps < self.env_cfg.old_slice_overlap_threshold)
+        valid[non_stop_indices] = valid_mask
+        
         overlap = max(self._old_slice_overlap(), self._attempted_slice_overlap())
-        non_stop_valid = bool(valid[[int(a) for a in non_stop_actions]].any())
+        non_stop_valid = bool(valid_mask.any())
         valid[int(Action.STOP)] = not (
             overlap >= self.env_cfg.old_slice_overlap_threshold and non_stop_valid
         )

@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from rl_sahi.common.config import load_default_config
 
 
-DEFAULT_IMAGE = ROOT / r"data\raw\images\test\0000074_10730_d_0000021.jpg"
+DEFAULT_IMAGE = ROOT / r"data\raw\images\test\0000006_00159_d_0000001.jpg"
 VISDRONE_CLASSES = (
     "pedestrian",
     "people",
