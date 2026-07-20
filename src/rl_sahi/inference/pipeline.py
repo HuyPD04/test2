@@ -61,6 +61,34 @@ def _filter_classes(
     return boxes[mask], scores[mask], classes[mask]
 
 
+def filter_boundary_boxes(
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    roi: np.ndarray,
+    image_shape: tuple[int, int],
+    margin: float = 2.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Remove boxes that touch the boundary of the slice (roi), 
+    unless that boundary is also the image's global boundary.
+    """
+    if len(boxes) == 0:
+        return boxes, scores, classes
+    
+    img_h, img_w = image_shape
+    x1, y1, x2, y2 = [int(round(v)) for v in roi]
+    
+    touches_left = (np.abs(boxes[:, 0] - x1) <= margin) & (x1 > 0)
+    touches_top = (np.abs(boxes[:, 1] - y1) <= margin) & (y1 > 0)
+    touches_right = (np.abs(boxes[:, 2] - x2) <= margin) & (x2 < img_w)
+    touches_bottom = (np.abs(boxes[:, 3] - y2) <= margin) & (y2 < img_h)
+    
+    keep = ~(touches_left | touches_top | touches_right | touches_bottom)
+    
+    return boxes[keep], scores[keep], classes[keep]
+
+
 def _merged_source_counts(
     full_boxes: np.ndarray,
     full_scores: np.ndarray,
@@ -653,6 +681,7 @@ def _infer_with_loaded(
             ):
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
+                boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes, full_scores, full_classes,
                     slice_boxes_all, slice_scores_all, slice_classes_all,
@@ -799,6 +828,7 @@ def _infer_with_loaded(
             ):
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
+                boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes,
                     full_scores,
