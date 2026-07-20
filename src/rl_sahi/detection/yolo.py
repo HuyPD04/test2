@@ -141,31 +141,9 @@ def load_yolo(weights: Path, device: DeviceLike = None):
         # Force use Legacy wrapper for TPH-YOLOv5 models
         return LegacyYOLOWrapper(weights, device)
     try:
+        model = YOLO(str(weights))
         resolved_device = configure_torch_runtime(device)
         configure_ultralytics_for_device(resolved_device)
-        
-        weights_path = Path(weights)
-        if resolved_device.type == "cuda" and weights_path.suffix == ".pt":
-            engine_path = weights_path.with_suffix(".engine")
-            if not engine_path.exists():
-                print(f"[load_yolo] TensorRT engine not found. Exporting {weights_path} to {engine_path}...")
-                print(f"[load_yolo] This may take a few minutes for the first time.")
-                temp_model = YOLO(str(weights_path))
-                try:
-                    # Export to TRT using FP16 and Dynamic batching/shapes
-                    temp_model.export(format="engine", device=resolved_device, half=True, dynamic=True)
-                except Exception as export_err:
-                    print(f"[load_yolo] TensorRT export threw an error: {export_err}")
-            
-            if engine_path.exists():
-                print(f"[load_yolo] Successfully loaded TensorRT engine: {engine_path}")
-                model = YOLO(str(engine_path))
-            else:
-                print(f"[load_yolo] TensorRT engine not available. Falling back to {weights_path}")
-                model = YOLO(str(weights_path))
-        else:
-            model = YOLO(str(weights_path))
-            
         model.to(resolved_device)
         return model
     except Exception as e:
