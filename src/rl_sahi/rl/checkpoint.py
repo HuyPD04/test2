@@ -85,10 +85,11 @@ class ONNXPolicyWrapper:
 
 def load_policy(checkpoint_path: Path, device: DeviceLike = None) -> tuple[Any, dict]:
     device = resolve_torch_device(device)
+    from torch.serialization import load as torch_original_load
     try:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    except (TypeError, Exception):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch_original_load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch_original_load(checkpoint_path, map_location="cpu")
     env_allowed = {field.name for field in fields(EnvConfig)}
     state_allowed = {field.name for field in fields(StateConfig)}
     env_cfg = EnvConfig(**{key: value for key, value in checkpoint.get("env_cfg", {}).items() if key in env_allowed})
