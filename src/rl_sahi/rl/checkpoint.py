@@ -59,7 +59,31 @@ def build_training_metadata(
     }
 
 
-def load_policy(checkpoint_path: Path, device: DeviceLike = None) -> tuple[QNetwork, dict]:
+_DISABLE_ONNX_AUTOLOAD = False
+
+class ONNXPolicyWrapper:
+    def __init__(self, onnx_path: str, device: DeviceLike = None):
+        import onnxruntime as ort
+        device_str = str(device).lower() if device is not None else "cpu"
+        providers = ['CUDAExecutionProvider'] if "cuda" in device_str else ['CPUExecutionProvider']
+        
+        # fallback to CPU if CUDA is requested but not available in ORT
+        if "cuda" in device_str and 'CUDAExecutionProvider' not in ort.get_available_providers():
+            providers = ['CPUExecutionProvider']
+            
+        self.session = ort.InferenceSession(str(onnx_path), providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        
+        # Expose input_dim for compatibility with rollout.py
+        shape = self.session.get_inputs()[0].shape
+        self.input_dim = shape[1] if len(shape) > 1 else None
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        inputs = {self.input_name: x.cpu().numpy()}
+        outs = self.session.run(None, inputs)
+        return torch.from_numpy(outs[0]).to(x.device)
+
+def load_policy(checkpoint_path: Path, device: DeviceLike = None) -> tuple[Any, dict]:
     device = resolve_torch_device(device)
     try:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -80,6 +104,15 @@ def load_policy(checkpoint_path: Path, device: DeviceLike = None) -> tuple[QNetw
             f"Checkpoint was trained with {len(checkpoint_actions)} actions, but current code expects {NUM_ACTIONS}. "
             "Retrain the DQN with the current action space."
         )
+    checkpoint["env_cfg_obj"] = env_cfg
+    checkpoint["state_cfg_obj"] = state_cfg
+
+    onnx_path = checkpoint_path.with_suffix('.onnx')
+    if not _DISABLE_ONNX_AUTOLOAD and onnx_path.exists():
+        print(f"⚡ [ONNX] Auto-loading accelerated model: {onnx_path.name}")
+        policy = ONNXPolicyWrapper(str(onnx_path), device)
+        return policy, checkpoint
+
     policy = QNetwork(
         int(checkpoint["state_dim"]),
         hidden_dim=hidden_dim,
@@ -96,6 +129,4 @@ def load_policy(checkpoint_path: Path, device: DeviceLike = None) -> tuple[QNetw
         ) from exc
     policy.to(device)
     policy.eval()
-    checkpoint["env_cfg_obj"] = env_cfg
-    checkpoint["state_cfg_obj"] = state_cfg
     return policy, checkpoint
