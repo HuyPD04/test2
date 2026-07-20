@@ -40,12 +40,14 @@ class QNetwork(nn.Module):
             return
 
         assert layout is not None
+        # Replace AdaptiveAvgPool2d to support ONNX exporting without dynamic shape errors
+        kernel_s = layout.grid_size // 4
         self.spatial = nn.Sequential(
             nn.Conv2d(layout.map_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.AvgPool2d(kernel_size=kernel_s, stride=kernel_s),
             nn.Flatten(),
         )
         spatial_dim = 64 * 4 * 4
