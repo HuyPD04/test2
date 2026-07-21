@@ -22,4 +22,6 @@ tph-yolov5l.pt
 tph-best.pt
 visualizations/
 detections/
+data.rar
 metadata/
+yolo11vip.pt
