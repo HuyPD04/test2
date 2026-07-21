@@ -2,7 +2,7 @@ infer:
   full_imgsz: 736
   slice_imgsz: 512
   full_conf: 0.01
-  output_conf: 0.30
+  output_conf: 0.3
   iou: 0.7
   merge_iou: 0.65
   max_det: 3000
@@ -30,7 +30,7 @@ infer:
 
 benchmark:
   output_conf: 0.05
-  iou_threshold: 0.35
+  iou_threshold: 0.5
   eval_max_detections: 500
   fixed_slice_fraction: 0.35
   fixed_overlap: 0.2
