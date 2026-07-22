@@ -176,6 +176,7 @@ def batched_train_dqn(
     limit: int | None = None, device_name: str | None = None, detection_metadata: dict[str, Any] | None = None,
     hard_region_metadata: dict[str, Any] | None = None,
     target_classes: tuple[int, ...] = (), class_mapping: ClassMapping | None = None, label_root: Path | None = None,
+    annotation_root: Path | None = None,
     eval_weights: Path | None = None, eval_full_weights: Path | None = None, eval_crop_weights: Path | None = None,
     infer_cfg: InferenceConfig | None = None, bench_cfg: BenchmarkConfig | None = None,
     eval_use_cache: bool = True,
@@ -671,6 +672,7 @@ def batched_train_dqn(
                                     env_cfg=env_cfg,
                                     state_cfg=state_cfg,
                                     use_cache=eval_use_cache,
+                                    annotation_root=annotation_root,
                                 )
                                 selected_score = benchmark_score(bench_metrics, cfg, env_cfg)
                                 row["val_mAP50"] = round(bench_metrics["mAP50"], 6)

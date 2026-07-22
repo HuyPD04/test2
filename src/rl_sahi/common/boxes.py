@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from rl_sahi.common.box_geometry import area, center_inside, centers, intersection_matrix, ioa_matrix, iou_matrix, normalized_box
+from rl_sahi.common.box_geometry import (
+    area,
+    center_inside,
+    centers,
+    covered_area_by_boxes,
+    intersection_matrix,
+    ioa_matrix,
+    iou_matrix,
+    normalized_box,
+)
 from rl_sahi.common.box_transforms import box_from_center, clip_boxes, translate_box, xywhn_to_xyxy, xyxy_to_xywhn, zoom_box
 from rl_sahi.common.box_types import EPS, as_boxes
 from rl_sahi.common.nms import nms_numpy
@@ -15,6 +24,7 @@ __all__ = [
     "center_inside",
     "centers",
     "clip_boxes",
+    "covered_area_by_boxes",
     "intersection_matrix",
     "ioa_matrix",
     "iou_matrix",

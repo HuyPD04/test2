@@ -68,6 +68,10 @@ def main() -> None:
         full_weights = cfg.path_value("full_weights")
     except KeyError:
         full_weights = None
+    try:
+        annotation_root = cfg.path_value("annotation_root")
+    except KeyError:
+        annotation_root = None
 
     rows = benchmark_split(
         weights=cfg.path_value("weights"),
@@ -77,6 +81,7 @@ def main() -> None:
         image_root=cfg.path_value("image_root"),
         label_root=cfg.path_value("label_root"),
         cache_root=cfg.path_value("cache_root"),
+        annotation_root=annotation_root,
         split=args.split,
         infer_cfg=InferenceConfig(
             full_imgsz=int(infer_cfg["full_imgsz"]),
@@ -145,6 +150,7 @@ def main() -> None:
             detector_gflops=float(benchmark_cfg.get("detector_gflops", 21.5)),
             agent_gflops=float(benchmark_cfg.get("agent_gflops", 0.0)),
             eval_max_detections=int(benchmark_cfg.get("eval_max_detections", 500)),
+            ignore_overlap_threshold=float(benchmark_cfg.get("ignore_overlap_threshold", 0.5)),
             target_classes=target_classes,
             class_mapping=class_mapping,
         ),

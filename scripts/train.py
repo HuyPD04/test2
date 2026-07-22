@@ -167,6 +167,10 @@ def main() -> None:
         full_weights = cfg.path_value("full_weights")
     except KeyError:
         full_weights = None
+    try:
+        annotation_root = cfg.path_value("annotation_root")
+    except KeyError:
+        annotation_root = None
     checkpoint = batched_train_dqn(
         image_root=cfg.path_value("image_root"),
         cache_root=cfg.path_value("cache_root"),
@@ -182,6 +186,7 @@ def main() -> None:
         target_classes=target_classes,
         class_mapping=class_mapping,
         label_root=cfg.path_value("label_root"),
+        annotation_root=annotation_root,
         eval_weights=cfg.path_value("weights"),
         eval_full_weights=full_weights,
         eval_crop_weights=crop_weights,
@@ -231,6 +236,7 @@ def main() -> None:
             sampling=str(benchmark_cfg.get("sampling", "stratified")),
             seed=int(benchmark_cfg.get("seed", 42)),
             eval_max_detections=int(benchmark_cfg.get("eval_max_detections", 500)),
+            ignore_overlap_threshold=float(benchmark_cfg.get("ignore_overlap_threshold", 0.5)),
             target_classes=target_classes,
             class_mapping=class_mapping,
         ),

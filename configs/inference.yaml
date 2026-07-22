@@ -32,6 +32,7 @@ benchmark:
   output_conf: 0.05
   iou_threshold: 0.5
   eval_max_detections: 500
+  ignore_overlap_threshold: 0.5
   fixed_slice_fraction: 0.35
   fixed_overlap: 0.2
   include_sahi_library: false

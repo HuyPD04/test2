@@ -105,6 +105,37 @@ class BenchmarkSamplingTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["AP50"], 1.0)
         self.assertEqual(metrics["eval_max_detections"], 1.0)
 
+    def test_predictions_inside_ignore_regions_do_not_count_as_fp(self) -> None:
+        ground_truth = {
+            "a": (
+                np.asarray([[0, 0, 10, 10]], dtype=np.float32),
+                np.asarray([0], dtype=np.float32),
+                (100, 100),
+                np.asarray([[40, 40, 70, 70]], dtype=np.float32),
+            )
+        }
+        predictions = {
+            "a": (
+                np.asarray([[42, 42, 60, 60], [0, 0, 10, 10]], dtype=np.float32),
+                np.asarray([0.99, 0.50], dtype=np.float32),
+                np.asarray([0, 0], dtype=np.float32),
+            )
+        }
+        metrics = _evaluate_method(
+            predictions,
+            ground_truth,
+            target_classes=(0,),
+            iou_threshold=0.5,
+            small_area_threshold=1.0,
+            max_detections=500,
+            ignore_overlap_threshold=0.5,
+        )
+        self.assertAlmostEqual(metrics["AP50"], 1.0)
+        self.assertAlmostEqual(metrics["precision"], 1.0)
+        self.assertAlmostEqual(metrics["recall"], 1.0)
+        self.assertAlmostEqual(metrics["fp_per_image"], 0.0)
+        self.assertAlmostEqual(metrics["ignored_predictions_per_image"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,24 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from rl_sahi.common.boxes import area, box_from_center, centers, clip_boxes, intersection_matrix, iou_matrix
+from rl_sahi.common.boxes import (
+    area,
+    box_from_center,
+    centers,
+    clip_boxes,
+    covered_area_by_boxes,
+    intersection_matrix,
+    iou_matrix,
+)
 from rl_sahi.common.cache import DetectionCache, file_fingerprint
 from rl_sahi.common.class_mapping import ClassMapping
-from rl_sahi.common.data import image_to_label_path, iter_images, read_yolo_labels
+from rl_sahi.common.data import (
+    image_to_annotation_path,
+    image_to_label_path,
+    iter_images,
+    read_visdrone_det_annotations,
+    read_yolo_labels,
+)
 from rl_sahi.common.device import resolve_torch_device
 from rl_sahi.detection.yolo import load_yolo
 from rl_sahi.inference.config import InferenceConfig
@@ -69,6 +83,7 @@ class BenchmarkConfig:
     detector_gflops: float = 21.5
     agent_gflops: float = 0.0
     eval_max_detections: int = 500
+    ignore_overlap_threshold: float = 0.5
     target_classes: tuple[int, ...] = (0, 2, 3, 5, 8, 9)
     class_mapping: ClassMapping = field(default_factory=ClassMapping)
 
@@ -87,13 +102,77 @@ def _read_gt(
     label_root: Path,
     target_classes: tuple[int, ...],
     class_mapping: ClassMapping,
+    annotation_root: Path | None = None,
+    ignore_overlap_threshold: float = 0.5,
 ):
-    classes, boxes = read_yolo_labels(image_to_label_path(image_path, image_root, label_root), _image_shape(image_path))
+    shape = _image_shape(image_path)
+    if annotation_root is not None:
+        for annotation_path in _annotation_path_candidates(image_path, image_root, annotation_root):
+            if not annotation_path.exists():
+                continue
+            classes, boxes, ignore_boxes = read_visdrone_det_annotations(
+                annotation_path,
+                shape,
+                ignore_overlap_threshold=ignore_overlap_threshold,
+            )
+            classes = class_mapping.map_label_classes(classes)
+            if target_classes:
+                mask = np.isin(classes.astype(np.int64), np.asarray(target_classes, dtype=np.int64))
+                classes, boxes = classes[mask], boxes[mask]
+            return boxes.astype(np.float32), classes.astype(np.float32), ignore_boxes.astype(np.float32)
+
+    classes, boxes = read_yolo_labels(image_to_label_path(image_path, image_root, label_root), shape)
     classes = class_mapping.map_label_classes(classes)
     if target_classes:
         mask = np.isin(classes.astype(np.int64), np.asarray(target_classes, dtype=np.int64))
         classes, boxes = classes[mask], boxes[mask]
-    return boxes.astype(np.float32), classes.astype(np.float32)
+    return boxes.astype(np.float32), classes.astype(np.float32), np.zeros((0, 4), dtype=np.float32)
+
+
+def _annotation_path_candidates(image_path: Path, image_root: Path, annotation_root: Path) -> list[Path]:
+    image_path = Path(image_path)
+    image_root = Path(image_root)
+    annotation_root = Path(annotation_root)
+    label_name = image_path.with_suffix(".txt").name
+    candidates = [
+        image_to_annotation_path(image_path, image_root, annotation_root),
+        annotation_root / "annotations" / label_name,
+        annotation_root / label_name,
+    ]
+    try:
+        rel = image_path.relative_to(image_root)
+    except ValueError:
+        rel = image_path.name
+    rel_parts = rel.parts if isinstance(rel, Path) else ()
+    split = rel_parts[0] if rel_parts else None
+    if split is not None:
+        candidates.append((annotation_root / "annotations" / rel).with_suffix(".txt"))
+        for dataset_name in _visdrone_dataset_names(split):
+            candidates.append(annotation_root / dataset_name / "annotations" / label_name)
+        if annotation_root.name == "annotations":
+            parent = annotation_root.parent
+            for dataset_name in _visdrone_dataset_names(split):
+                candidates.append(parent / dataset_name / "annotations" / label_name)
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _visdrone_dataset_names(split: str) -> tuple[str, ...]:
+    if split == "test":
+        return ("VisDrone2019-DET-test-dev", "VisDrone2019-DET-test", "VisDrone2019-DET-test-challenge")
+    return (f"VisDrone2019-DET-{split}",)
+
+
+def _unpack_ground_truth(value):
+    gt_boxes, gt_classes, shape = value[:3]
+    ignore_boxes = value[3] if len(value) > 3 else np.zeros((0, 4), dtype=np.float32)
+    return gt_boxes, gt_classes, shape, ignore_boxes
 
 
 def _image_shape(image_path: Path) -> tuple[int, int]:
@@ -113,10 +192,20 @@ def _small_area_threshold(
     target_classes: tuple[int, ...],
     percentile: float,
     class_mapping: ClassMapping,
+    annotation_root: Path | None = None,
+    ignore_overlap_threshold: float = 0.5,
 ) -> float:
     ratios: list[np.ndarray] = []
     for image_path in images:
-        boxes, _classes = _read_gt(image_path, image_root, label_root, target_classes, class_mapping)
+        boxes, _classes, _ignore_boxes = _read_gt(
+            image_path,
+            image_root,
+            label_root,
+            target_classes,
+            class_mapping,
+            annotation_root,
+            ignore_overlap_threshold,
+        )
         if len(boxes) == 0:
             continue
         h, w = _image_shape(image_path)
@@ -131,6 +220,7 @@ def _resolve_small_area_threshold(
     image_root: Path,
     label_root: Path,
     cfg: BenchmarkConfig,
+    annotation_root: Path | None = None,
 ) -> float:
     if cfg.small_area_ratio is not None:
         return float(cfg.small_area_ratio)
@@ -143,6 +233,8 @@ def _resolve_small_area_threshold(
         cfg.target_classes,
         float(cfg.small_area_percentile),
         cfg.class_mapping,
+        annotation_root,
+        cfg.ignore_overlap_threshold,
     )
 
 
@@ -204,6 +296,13 @@ def _git_revision(project_root: Path) -> str | None:
         return result.stdout.strip() or None
     except Exception:
         return None
+
+
+def _path_status(path: Path | None) -> dict[str, str | bool] | None:
+    if path is None:
+        return None
+    resolved = Path(path).resolve()
+    return {"path": str(resolved), "exists": resolved.exists()}
 
 
 def _merge_predictions(
@@ -852,11 +951,51 @@ def _ap_from_pr(tp: np.ndarray, fp: np.ndarray, total_gt: int) -> float:
     return float(np.mean(sampled))
 
 
+def _is_ignored_prediction(
+    box: np.ndarray,
+    ignore_boxes: np.ndarray,
+    overlap_threshold: float,
+) -> bool:
+    ignore_boxes = np.asarray(ignore_boxes, dtype=np.float32).reshape(-1, 4)
+    if len(ignore_boxes) == 0:
+        return False
+    box_arr = np.asarray(box, dtype=np.float32).reshape(1, 4)
+    pred_area = max(float(area(box_arr)[0]), 1e-7)
+    ignored_overlap = float(covered_area_by_boxes(box_arr, ignore_boxes)[0] / pred_area)
+    return ignored_overlap >= float(overlap_threshold)
+
+
+def _ignored_prediction_count(
+    predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
+    ground_truth: dict[str, tuple],
+    target_classes: tuple[int, ...],
+    ignore_overlap_threshold: float,
+) -> int:
+    target = np.asarray(target_classes, dtype=np.int64)
+    count = 0
+    for image_id, (boxes, _scores, classes) in predictions.items():
+        if image_id not in ground_truth or len(boxes) == 0:
+            continue
+        _gt_boxes, _gt_classes, _shape, ignore_boxes = _unpack_ground_truth(ground_truth[image_id])
+        if len(ignore_boxes) == 0:
+            continue
+        mask = np.isin(classes.astype(np.int64), target) if len(target) > 0 else np.ones((len(classes),), dtype=bool)
+        for box in boxes[mask]:
+            if _is_ignored_prediction(box, ignore_boxes, ignore_overlap_threshold):
+                count += 1
+    return count
+
+
+def _ignored_region_count(ground_truth: dict[str, tuple]) -> int:
+    return int(sum(len(_unpack_ground_truth(value)[3]) for value in ground_truth.values()))
+
+
 def _ap_and_fp_at_iou(
     predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]],
+    ground_truth: dict[str, tuple],
     target_classes: tuple[int, ...],
     iou_threshold: float,
+    ignore_overlap_threshold: float = 0.5,
 ) -> tuple[float, int]:
     aps: list[float] = []
     total_fp = 0
@@ -864,33 +1003,43 @@ def _ap_and_fp_at_iou(
         pred_rows: list[tuple[str, float, np.ndarray]] = []
         gt_by_image: dict[str, np.ndarray] = {}
         matched_by_image: dict[str, np.ndarray] = {}
-        for image_id, (gt_boxes, gt_classes, _shape) in ground_truth.items():
+        ignore_by_image: dict[str, np.ndarray] = {}
+        for image_id, value in ground_truth.items():
+            gt_boxes, gt_classes, _shape, ignore_boxes = _unpack_ground_truth(value)
             gt_cls_boxes = gt_boxes[gt_classes.astype(np.int64) == int(cls)]
             gt_by_image[image_id] = gt_cls_boxes
             matched_by_image[image_id] = np.zeros((len(gt_cls_boxes),), dtype=bool)
+            ignore_by_image[image_id] = ignore_boxes
         for image_id, (boxes, scores, classes) in predictions.items():
             mask = classes.astype(np.int64) == int(cls)
             for box, score in zip(boxes[mask], scores[mask]):
                 pred_rows.append((image_id, float(score), box))
         pred_rows.sort(key=lambda row: row[1], reverse=True)
-        tp = np.zeros((len(pred_rows),), dtype=np.float32)
-        fp = np.zeros((len(pred_rows),), dtype=np.float32)
-        for index, (image_id, _score, box) in enumerate(pred_rows):
+        tp_values: list[float] = []
+        fp_values: list[float] = []
+        for image_id, _score, box in pred_rows:
             gt_boxes = gt_by_image[image_id]
-            if len(gt_boxes) == 0:
-                fp[index] = 1.0
-                continue
-            ious = iou_matrix(box.reshape(1, 4), gt_boxes)[0]
+            matched_gt = False
+            if len(gt_boxes) > 0:
+                ious = iou_matrix(box.reshape(1, 4), gt_boxes)[0]
 
-            # Mask out already matched ground truth boxes
-            ious[matched_by_image[image_id]] = -1.0
+                # Mask out already matched ground truth boxes
+                ious[matched_by_image[image_id]] = -1.0
 
-            best = int(ious.argmax())
-            if float(ious[best]) >= iou_threshold:
-                tp[index] = 1.0
+                best = int(ious.argmax())
+                if float(ious[best]) >= iou_threshold:
+                    matched_gt = True
+            if matched_gt:
+                tp_values.append(1.0)
+                fp_values.append(0.0)
                 matched_by_image[image_id][best] = True
+            elif _is_ignored_prediction(box, ignore_by_image[image_id], ignore_overlap_threshold):
+                continue
             else:
-                fp[index] = 1.0
+                tp_values.append(0.0)
+                fp_values.append(1.0)
+        tp = np.asarray(tp_values, dtype=np.float32)
+        fp = np.asarray(fp_values, dtype=np.float32)
         total_gt = sum(len(x) for x in gt_by_image.values())
         if total_gt > 0:
             aps.append(_ap_from_pr(tp, fp, total_gt))
@@ -900,9 +1049,10 @@ def _ap_and_fp_at_iou(
 
 def _precision_recall_at_iou(
     predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]],
+    ground_truth: dict[str, tuple],
     target_classes: tuple[int, ...],
     iou_threshold: float,
+    ignore_overlap_threshold: float = 0.5,
 ) -> tuple[float, float]:
     total_tp = 0
     total_fp = 0
@@ -910,10 +1060,13 @@ def _precision_recall_at_iou(
     for cls in target_classes:
         gt_by_image: dict[str, np.ndarray] = {}
         matched_by_image: dict[str, np.ndarray] = {}
-        for image_id, (gt_boxes, gt_classes, _shape) in ground_truth.items():
+        ignore_by_image: dict[str, np.ndarray] = {}
+        for image_id, value in ground_truth.items():
+            gt_boxes, gt_classes, _shape, ignore_boxes = _unpack_ground_truth(value)
             gt_cls_boxes = gt_boxes[gt_classes.astype(np.int64) == int(cls)]
             gt_by_image[image_id] = gt_cls_boxes
             matched_by_image[image_id] = np.zeros((len(gt_cls_boxes),), dtype=bool)
+            ignore_by_image[image_id] = ignore_boxes
             total_gt += len(gt_cls_boxes)
 
         pred_rows: list[tuple[str, float, np.ndarray]] = []
@@ -926,15 +1079,18 @@ def _precision_recall_at_iou(
 
         for image_id, _score, box in pred_rows:
             gt_boxes = gt_by_image[image_id]
-            if len(gt_boxes) == 0:
-                total_fp += 1
-                continue
-            ious = iou_matrix(box.reshape(1, 4), gt_boxes)[0]
-            ious[matched_by_image[image_id]] = -1.0
-            best = int(ious.argmax())
-            if float(ious[best]) >= iou_threshold:
+            matched_gt = False
+            if len(gt_boxes) > 0:
+                ious = iou_matrix(box.reshape(1, 4), gt_boxes)[0]
+                ious[matched_by_image[image_id]] = -1.0
+                best = int(ious.argmax())
+                if float(ious[best]) >= iou_threshold:
+                    matched_gt = True
+            if matched_gt:
                 total_tp += 1
                 matched_by_image[image_id][best] = True
+            elif _is_ignored_prediction(box, ignore_by_image[image_id], ignore_overlap_threshold):
+                continue
             else:
                 total_fp += 1
 
@@ -945,13 +1101,14 @@ def _precision_recall_at_iou(
 
 def _small_recall_at_iou(
     predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]],
+    ground_truth: dict[str, tuple],
     iou_threshold: float,
     small_area_threshold: float,
 ) -> float:
     small_total = 0
     small_hit = 0
-    for image_id, (gt_boxes, gt_classes, shape) in ground_truth.items():
+    for image_id, value in ground_truth.items():
+        gt_boxes, gt_classes, shape, _ignore_boxes = _unpack_ground_truth(value)
         if len(gt_boxes) == 0:
             continue
         h, w = shape
@@ -969,11 +1126,12 @@ def _small_recall_at_iou(
 
 def _evaluate_method(
     predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]],
+    ground_truth: dict[str, tuple],
     target_classes: tuple[int, ...],
     iou_threshold: float,
     small_area_threshold: float,
     max_detections: int = 500,
+    ignore_overlap_threshold: float = 0.5,
 ) -> dict[str, float]:
     predictions = _limit_predictions_per_image(predictions, max_detections)
     ap_thresholds = tuple(float(x) for x in np.arange(0.50, 0.96, 0.05))
@@ -981,7 +1139,11 @@ def _evaluate_method(
     for cls in target_classes:
         per_class[int(cls)] = {
             threshold: _ap_and_fp_at_iou(
-                predictions, ground_truth, (int(cls),), threshold
+                predictions,
+                ground_truth,
+                (int(cls),),
+                threshold,
+                ignore_overlap_threshold,
             )
             for threshold in ap_thresholds
         }
@@ -991,7 +1153,9 @@ def _evaluate_method(
         for cls in target_classes
         if any(
             bool(np.any(gt_classes.astype(np.int64) == int(cls)))
-            for _gt_boxes, gt_classes, _shape in ground_truth.values()
+            for _gt_boxes, gt_classes, _shape, _ignore_boxes in (
+                _unpack_ground_truth(value) for value in ground_truth.values()
+            )
         )
     ]
 
@@ -1008,7 +1172,11 @@ def _evaluate_method(
     if not np.isclose(primary_threshold, float(iou_threshold)):
         primary_rows = {
             int(cls): _ap_and_fp_at_iou(
-                predictions, ground_truth, (int(cls),), float(iou_threshold)
+                predictions,
+                ground_truth,
+                (int(cls),),
+                float(iou_threshold),
+                ignore_overlap_threshold,
             )
             for cls in target_classes
         }
@@ -1018,8 +1186,19 @@ def _evaluate_method(
             per_class[int(cls)][primary_threshold][1] for cls in target_classes
         )
     precision, recall = _precision_recall_at_iou(
-        predictions, ground_truth, target_classes, iou_threshold
+        predictions,
+        ground_truth,
+        target_classes,
+        iou_threshold,
+        ignore_overlap_threshold,
     )
+    ignored_predictions = _ignored_prediction_count(
+        predictions,
+        ground_truth,
+        target_classes,
+        ignore_overlap_threshold,
+    )
+    ignored_regions = _ignored_region_count(ground_truth)
     metrics = {
         "AP": float(np.mean(ap_values)) if ap_values else 0.0,
         "AP50": ap50,
@@ -1030,6 +1209,9 @@ def _evaluate_method(
         "small_recall": _small_recall_at_iou(predictions, ground_truth, iou_threshold, small_area_threshold),
         "fp_per_image": float(total_fp / max(len(ground_truth), 1)),
         "eval_max_detections": float(max_detections),
+        "ignored_predictions_per_image": float(ignored_predictions / max(len(ground_truth), 1)),
+        "ignored_regions_per_image": float(ignored_regions / max(len(ground_truth), 1)),
+        "ignore_overlap_threshold": float(ignore_overlap_threshold),
     }
     for threshold, value in zip(ap_thresholds, ap_values):
         metrics[_ap_metric_name(threshold)] = float(value)
@@ -1061,9 +1243,16 @@ def evaluate_rl_sahi_policy(
     env_cfg,
     state_cfg: StateConfig,
     use_cache: bool = True,
+    annotation_root: Path | None = None,
 ) -> dict[str, float]:
     if not images:
         raise FileNotFoundError(f"No images provided for split '{split}'")
+    if annotation_root is not None and not Path(annotation_root).exists():
+        print(
+            f"[benchmark] annotation_root not found ({annotation_root}); "
+            "falling back to YOLO labels without ignore masks",
+            flush=True,
+        )
 
     infer_cfg = replace(
         infer_cfg,
@@ -1071,8 +1260,8 @@ def evaluate_rl_sahi_policy(
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
-    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]] = {}
+    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg, annotation_root)
+    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int], np.ndarray]] = {}
     predictions: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     crops: list[int] = []
     accepted_crops: list[int] = []
@@ -1085,15 +1274,17 @@ def evaluate_rl_sahi_policy(
                 flush=True,
             )
         image_id = image_path.stem
-        gt_boxes, gt_classes = _read_gt(
+        gt_boxes, gt_classes, ignore_boxes = _read_gt(
             image_path,
             image_root,
             label_root,
             bench_cfg.target_classes,
             bench_cfg.class_mapping,
+            annotation_root,
+            bench_cfg.ignore_overlap_threshold,
         )
         shape = _image_shape(image_path)
-        ground_truth[image_id] = (gt_boxes, gt_classes, shape)
+        ground_truth[image_id] = (gt_boxes, gt_classes, shape, ignore_boxes)
 
         det = get_initial_detection(
             model=model,
@@ -1137,6 +1328,7 @@ def evaluate_rl_sahi_policy(
         bench_cfg.iou_threshold,
         small_threshold,
         bench_cfg.eval_max_detections,
+        bench_cfg.ignore_overlap_threshold,
     )
     return {
         **metrics,
@@ -1162,6 +1354,7 @@ def benchmark_split(
     full_weights: Path | None = None,
     limit: int | None = None,
     use_cache: bool = True,
+    annotation_root: Path | None = None,
 ) -> list[dict[str, float | str]]:
     inference_config = asdict(infer_cfg)
     images = select_benchmark_images(
@@ -1172,6 +1365,12 @@ def benchmark_split(
     )
     if not images:
         raise FileNotFoundError(f"No images found for split '{split}'")
+    if annotation_root is not None and not Path(annotation_root).exists():
+        print(
+            f"[benchmark] annotation_root not found ({annotation_root}); "
+            "falling back to YOLO labels without ignore masks",
+            flush=True,
+        )
 
     infer_cfg = replace(
         infer_cfg,
@@ -1179,7 +1378,7 @@ def benchmark_split(
         target_classes=bench_cfg.target_classes,
         class_mapping=bench_cfg.class_mapping,
     )
-    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg)
+    small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg, annotation_root)
     detector_device_t = resolve_torch_device(infer_cfg.device)
     model = load_yolo(weights, device=detector_device_t)
     full_model = load_yolo(full_weights, device=detector_device_t) if full_weights else model
@@ -1218,7 +1417,7 @@ def benchmark_split(
             method_names.append(proposal_gated_method)
     method_names.append("rl_sahi")
 
-    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int]]] = {}
+    ground_truth: dict[str, tuple[np.ndarray, np.ndarray, tuple[int, int], np.ndarray]] = {}
     predictions = {name: {} for name in method_names}
     crops = {key: [] for key in predictions}
     accepted_crops = {key: [] for key in predictions}
@@ -1245,15 +1444,17 @@ def benchmark_split(
                 flush=True,
             )
         image_id = image_path.stem
-        gt_boxes, gt_classes = _read_gt(
+        gt_boxes, gt_classes, ignore_boxes = _read_gt(
             image_path,
             image_root,
             label_root,
             bench_cfg.target_classes,
             bench_cfg.class_mapping,
+            annotation_root,
+            bench_cfg.ignore_overlap_threshold,
         )
         shape = _image_shape(image_path)
-        ground_truth[image_id] = (gt_boxes, gt_classes, shape)
+        ground_truth[image_id] = (gt_boxes, gt_classes, shape, ignore_boxes)
 
         initial_start = time.perf_counter()
         det = get_initial_detection(
@@ -1477,6 +1678,7 @@ def benchmark_split(
             bench_cfg.iou_threshold,
             small_threshold,
             bench_cfg.eval_max_detections,
+            bench_cfg.ignore_overlap_threshold,
         )
         crop_mean = float(np.mean(crops[method]))
         incremental_ms = float(np.mean(latency[method]) * 1000.0)
@@ -1518,6 +1720,7 @@ def benchmark_split(
         "git_revision": _git_revision(project_root),
         "weights": file_fingerprint(weights),
         "checkpoint": file_fingerprint(checkpoint),
+        "annotation_root": _path_status(annotation_root),
         "images": [image.name for image in images],
         "warmup_images": warmup_images,
         "timed_images": timed_images,

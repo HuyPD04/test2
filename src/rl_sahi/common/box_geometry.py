@@ -24,6 +24,52 @@ def intersection_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return (np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)).astype(np.float32)
 
 
+def covered_area_by_boxes(targets: np.ndarray, covers: np.ndarray) -> np.ndarray:
+    targets = as_boxes(targets)
+    covers = as_boxes(covers)
+    output = np.zeros((len(targets),), dtype=np.float32)
+    if len(targets) == 0 or len(covers) == 0:
+        return output
+    for index, target in enumerate(targets):
+        x1 = np.maximum(target[0], covers[:, 0])
+        y1 = np.maximum(target[1], covers[:, 1])
+        x2 = np.minimum(target[2], covers[:, 2])
+        y2 = np.minimum(target[3], covers[:, 3])
+        valid = (x2 > x1) & (y2 > y1)
+        if valid.any():
+            output[index] = float(_union_area(np.stack((x1[valid], y1[valid], x2[valid], y2[valid]), axis=1)))
+    return output
+
+
+def _union_area(boxes: np.ndarray) -> float:
+    boxes = as_boxes(boxes)
+    if len(boxes) == 0:
+        return 0.0
+    xs = np.unique(np.concatenate((boxes[:, 0], boxes[:, 2]), axis=0))
+    if len(xs) < 2:
+        return 0.0
+    total = 0.0
+    for left, right in zip(xs[:-1], xs[1:]):
+        width = float(right - left)
+        if width <= 0.0:
+            continue
+        active = boxes[(boxes[:, 0] < right) & (boxes[:, 2] > left)]
+        if len(active) == 0:
+            continue
+        intervals = sorted((float(y1), float(y2)) for y1, y2 in active[:, [1, 3]])
+        merged_height = 0.0
+        current_start, current_end = intervals[0]
+        for start, end in intervals[1:]:
+            if start <= current_end:
+                current_end = max(current_end, end)
+            else:
+                merged_height += max(current_end - current_start, 0.0)
+                current_start, current_end = start, end
+        merged_height += max(current_end - current_start, 0.0)
+        total += width * merged_height
+    return total
+
+
 def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     inter = intersection_matrix(a, b)
     if inter.size == 0:
