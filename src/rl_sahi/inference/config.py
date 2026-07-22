@@ -21,6 +21,8 @@ class InferenceConfig:
     min_slice_utility: float = 0.5
     min_new_detection_score: float = 0.45
     duplicate_iou: float = 0.5
+    cross_class_duplicate_iou: float | None = 0.85
+    cross_class_duplicate_ios: float | None = 0.95
     max_slice_attempts: int = 0
     roi_prefilter_enabled: bool = False
     roi_prefilter_topk: int = 3

@@ -26,6 +26,15 @@ def _bool_value(value) -> bool:
     return bool(value)
 
 
+def _optional_float(value, default: float | None = None) -> float | None:
+    raw = default if value is None else value
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.strip().lower() in {"", "none", "null", "false", "off"}:
+        return None
+    return float(raw)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train DQN to choose one adaptive slice from cached YOLO state.")
     parser.add_argument("--config", type=Path, default=None)
@@ -205,6 +214,8 @@ def main() -> None:
             min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),
             min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
             duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
+            cross_class_duplicate_iou=_optional_float(infer_cfg.get("cross_class_duplicate_iou"), 0.85),
+            cross_class_duplicate_ios=_optional_float(infer_cfg.get("cross_class_duplicate_ios"), 0.95),
             max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),
             roi_prefilter_enabled=bool(infer_cfg.get("roi_prefilter_enabled", False)),
             roi_prefilter_topk=int(infer_cfg.get("roi_prefilter_topk", 3)),

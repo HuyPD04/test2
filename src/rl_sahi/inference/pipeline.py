@@ -27,11 +27,15 @@ from rl_sahi.detection.yolo import detect_one_image, load_yolo
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.inference.crops import run_yolo_on_crops
 from rl_sahi.inference.merge import (
+    DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
+    DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     accepts_novel_detections,
     class_aware_nms,
+    cross_class_duplicate_keep,
     new_detection_gain_after_merge,
     new_detection_stats_after_merge,
     new_detection_utility_after_merge,
+    resolve_cross_class_duplicates,
     save_prediction_txt,
     source_counts_after_merge,
 )
@@ -98,6 +102,8 @@ def _merged_source_counts(
     slice_classes_parts: list[np.ndarray],
     image_shape: tuple[int, int],
     merge_iou: float,
+    cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
+    cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
 ) -> tuple[int, int]:
     return source_counts_after_merge(
         full_boxes,
@@ -108,6 +114,8 @@ def _merged_source_counts(
         slice_classes_parts,
         image_shape,
         merge_iou,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
 
 
@@ -124,6 +132,8 @@ def _new_detection_gain(
     image_shape: tuple[int, int],
     merge_iou: float,
     duplicate_iou: float | None = None,
+    cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
+    cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
 ) -> int:
     return new_detection_gain_after_merge(
         image_shape,
@@ -135,6 +145,8 @@ def _new_detection_gain(
         candidate_scores,
         candidate_classes,
         duplicate_iou=duplicate_iou,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
 
 
@@ -151,6 +163,8 @@ def _new_detection_utility(
     image_shape: tuple[int, int],
     merge_iou: float,
     duplicate_iou: float | None = None,
+    cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
+    cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
 ) -> float:
     return new_detection_utility_after_merge(
         image_shape,
@@ -162,6 +176,8 @@ def _new_detection_utility(
         candidate_scores,
         candidate_classes,
         duplicate_iou=duplicate_iou,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
 
 
@@ -178,6 +194,8 @@ def _new_detection_stats(
     image_shape: tuple[int, int],
     merge_iou: float,
     duplicate_iou: float | None = None,
+    cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
+    cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
 ) -> tuple[int, float, float]:
     return new_detection_stats_after_merge(
         image_shape,
@@ -189,6 +207,8 @@ def _new_detection_stats(
         candidate_scores,
         candidate_classes,
         duplicate_iou=duplicate_iou,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
 
 
@@ -537,20 +557,24 @@ def _infer_with_loaded(
         )[0]
         full_boxes, full_scores, full_classes = full_preds
         full_classes = cfg.class_mapping.map_model_classes(full_classes)
-        full_boxes, full_scores, full_classes = _filter_classes(
-            full_boxes, full_scores, full_classes, cfg.target_classes
-        )
     else:
         full_mask = det.scores >= cfg.output_conf
         full_boxes = det.boxes[full_mask]
         full_scores = det.scores[full_mask]
         full_classes = cfg.class_mapping.map_model_classes(det.classes[full_mask])
-        full_boxes, full_scores, full_classes = _filter_classes(
-            full_boxes,
-            full_scores,
-            full_classes,
-            cfg.target_classes,
-        )
+    full_boxes, full_scores, full_classes = _filter_classes(
+        full_boxes,
+        full_scores,
+        full_classes,
+        cfg.target_classes,
+    )
+    full_boxes, full_scores, full_classes = resolve_cross_class_duplicates(
+        full_boxes,
+        full_scores,
+        full_classes,
+        cfg.cross_class_duplicate_iou,
+        cfg.cross_class_duplicate_ios,
+    )
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
     crop_batch_size = max(int(cfg.crop_batch_size), 1)
     crop_prediction_count = 0
@@ -688,7 +712,11 @@ def _infer_with_loaded(
                     full_boxes, full_scores, full_classes,
                     slice_boxes_all, slice_scores_all, slice_classes_all,
                     boxes_i, scores_i, classes_i,
-                    det.image_shape, cfg.merge_iou, cfg.duplicate_iou,
+                    det.image_shape,
+                    cfg.merge_iou,
+                    cfg.duplicate_iou,
+                    cfg.cross_class_duplicate_iou,
+                    cfg.cross_class_duplicate_ios,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -844,6 +872,8 @@ def _infer_with_loaded(
                     det.image_shape,
                     cfg.merge_iou,
                     cfg.duplicate_iou,
+                    cfg.cross_class_duplicate_iou,
+                    cfg.cross_class_duplicate_ios,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -917,6 +947,14 @@ def _infer_with_loaded(
     else:
         keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou, nms_type=cfg.nms_type)
         boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
+    keep = cross_class_duplicate_keep(
+        boxes,
+        scores,
+        classes,
+        cfg.cross_class_duplicate_iou,
+        cfg.cross_class_duplicate_ios,
+    )
+    boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 
     out_dir = Path(out_dir)
@@ -982,6 +1020,15 @@ def _optional_value_or_config(section: dict, key: str, value, default, cast):
     return cast(raw)
 
 
+def _optional_float_or_config(section: dict, key: str, value, default: float | None) -> float | None:
+    raw = section.get(key, default) if value is None else value
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.strip().lower() in {"", "none", "null", "false", "off"}:
+        return None
+    return float(raw)
+
+
 def _bool_value(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
@@ -1026,6 +1073,8 @@ def infer_one_image(
     min_slice_utility: float | None = None,
     min_new_detection_score: float | None = None,
     duplicate_iou: float | None = None,
+    cross_class_duplicate_iou: float | None = None,
+    cross_class_duplicate_ios: float | None = None,
     max_slice_attempts: int | None = None,
     roi_prefilter_enabled: bool | None = None,
     roi_prefilter_topk: int | None = None,
@@ -1079,6 +1128,18 @@ def infer_one_image(
             float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5)))
             if duplicate_iou is None
             else float(duplicate_iou)
+        ),
+        cross_class_duplicate_iou=_optional_float_or_config(
+            infer_cfg,
+            "cross_class_duplicate_iou",
+            cross_class_duplicate_iou,
+            0.85,
+        ),
+        cross_class_duplicate_ios=_optional_float_or_config(
+            infer_cfg,
+            "cross_class_duplicate_ios",
+            cross_class_duplicate_ios,
+            0.95,
         ),
         max_slice_attempts=_value_or_config(infer_cfg, "max_slice_attempts", max_slice_attempts, int),
         roi_prefilter_enabled=(

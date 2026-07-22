@@ -105,6 +105,8 @@ class CropOutcomeEvaluator:
             [],
             image_shape,
             self.cfg.merge_iou,
+            self.cfg.cross_class_duplicate_iou,
+            self.cfg.cross_class_duplicate_ios,
         )
         return int(slice_count)
 
@@ -177,6 +179,8 @@ class CropOutcomeEvaluator:
             scores,
             classes,
             duplicate_iou=self.cfg.duplicate_iou,
+            cross_class_duplicate_iou=self.cfg.cross_class_duplicate_iou,
+            cross_class_duplicate_ios=self.cfg.cross_class_duplicate_ios,
         )
         tp_gain, fp_gain = self._tp_fp_gain(
             image_path,
@@ -327,6 +331,8 @@ class CropOutcomeEvaluator:
             [full_boxes, *slice_boxes_parts],
             [full_scores, *slice_scores_parts],
             [full_classes, *slice_classes_parts],
+            self.cfg.cross_class_duplicate_iou,
+            self.cfg.cross_class_duplicate_ios,
         )
         after_boxes, after_scores, after_classes = _merge_predictions(
             image_shape,
@@ -334,6 +340,8 @@ class CropOutcomeEvaluator:
             [full_boxes, *slice_boxes_parts, boxes],
             [full_scores, *slice_scores_parts, scores],
             [full_classes, *slice_classes_parts, classes],
+            self.cfg.cross_class_duplicate_iou,
+            self.cfg.cross_class_duplicate_ios,
         )
         before_tp, before_fp = _match_counts(
             before_boxes,
@@ -432,8 +440,18 @@ def _merge_predictions(
     boxes_parts: list[np.ndarray],
     scores_parts: list[np.ndarray],
     classes_parts: list[np.ndarray],
+    cross_class_duplicate_iou: float | None = 0.85,
+    cross_class_duplicate_ios: float | None = 0.95,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    return merge_predictions(image_shape, merge_iou, boxes_parts, scores_parts, classes_parts)
+    return merge_predictions(
+        image_shape,
+        merge_iou,
+        boxes_parts,
+        scores_parts,
+        classes_parts,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
+    )
 
 
 def _merged_source_counts(
@@ -445,6 +463,8 @@ def _merged_source_counts(
     slice_classes_parts: list[np.ndarray],
     image_shape: tuple[int, int],
     merge_iou: float,
+    cross_class_duplicate_iou: float | None = 0.85,
+    cross_class_duplicate_ios: float | None = 0.95,
 ) -> tuple[int, int]:
     return source_counts_after_merge(
         full_boxes,
@@ -455,6 +475,8 @@ def _merged_source_counts(
         slice_classes_parts,
         image_shape,
         merge_iou,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
 
 

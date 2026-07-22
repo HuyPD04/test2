@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.inference.merge import (
     accepts_novel_detections,
+    merge_predictions,
     new_detection_gain_after_merge,
     new_detection_stats_after_merge,
     new_detection_utility_after_merge,
@@ -88,6 +89,46 @@ class MergeGainTest(unittest.TestCase):
         )
 
         self.assertEqual(gain, 1)
+
+    def test_same_vehicle_location_different_class_lower_score_is_not_new(self) -> None:
+        gain = new_detection_gain_after_merge(
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            previous_boxes_parts=[np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32)],
+            previous_scores_parts=[np.array([0.9], dtype=np.float32)],
+            previous_classes_parts=[np.array([4.0], dtype=np.float32)],
+            candidate_boxes=np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32),
+            candidate_scores=np.array([0.8], dtype=np.float32),
+            candidate_classes=np.array([3.0], dtype=np.float32),
+        )
+
+        self.assertEqual(gain, 0)
+
+    def test_vehicle_cross_class_duplicate_keeps_highest_score(self) -> None:
+        boxes, scores, classes = merge_predictions(
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            boxes_parts=[np.array([[10.0, 10.0, 30.0, 30.0], [10.0, 10.0, 30.0, 30.0]], dtype=np.float32)],
+            scores_parts=[np.array([0.38, 0.51], dtype=np.float32)],
+            classes_parts=[np.array([3.0, 4.0], dtype=np.float32)],
+        )
+
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(float(scores[0]), 0.51, places=6)
+        self.assertEqual(int(classes[0]), 4)
+
+    def test_vehicle_cross_class_containment_keeps_highest_score(self) -> None:
+        boxes, scores, classes = merge_predictions(
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            boxes_parts=[np.array([[10.0, 10.0, 30.0, 30.0], [9.0, 9.0, 31.0, 31.0]], dtype=np.float32)],
+            scores_parts=[np.array([0.53, 0.38], dtype=np.float32)],
+            classes_parts=[np.array([3.0, 4.0], dtype=np.float32)],
+        )
+
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(float(scores[0]), 0.53, places=6)
+        self.assertEqual(int(classes[0]), 3)
 
     def test_single_novel_detection_uses_score_gate_not_sum_gate(self) -> None:
         gain, utility, max_score = new_detection_stats_after_merge(
