@@ -845,6 +845,8 @@ def train_dqn(
                 if benchmark_model is not None and infer_cfg is not None and bench_cfg is not None and label_root is not None:
                     bench_metrics = evaluate_rl_sahi_policy(
                         model=benchmark_model,
+                        full_model=benchmark_model,
+                        crop_model=benchmark_model,
                         policy=policy,
                         device_t=device,
                         weights=eval_weights,

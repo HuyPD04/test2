@@ -3,14 +3,14 @@
 Each row uses the same detector, validation split, inference thresholds, crop acceptance settings, and evaluator. Only the DQN checkpoint changes.
 
 Device: `cuda`. Checkpoint file name(s): `best.pt`.
-YOLO full-image reference: AP=31.97, AP50=51.30, Recall-small@0.50=70.18.
+YOLO full-image reference: AP=27.13, AP50=43.82, Recall-small@0.50=54.45.
 
 | Variant | Spatial feature | Detection map | History | Outcome reward | Cost/overlap | Action mask | AP | Delta AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Full RL-SAHI | Yes | Yes | Yes | Yes | Yes | Yes | 32.06 | +0.00 | 52.55 | 32.89 | 73.73 | 161.55 | 3.00 | 3.81 |
-| w/o spatial feature | No | Yes | Yes | Yes | Yes | Yes | 31.69 | -0.36 | 51.47 | 32.72 | 68.50 | 129.01 | 3.00 | 3.84 |
-| w/o detection map | Yes | No | Yes | Yes | Yes | Yes | 31.54 | -0.52 | 50.97 | 32.68 | 66.66 | 119.79 | 3.00 | 3.67 |
-| w/o history | Yes | Yes | No | Yes | Yes | Yes | 31.81 | -0.24 | 51.57 | 32.94 | 69.01 | 131.16 | 3.00 | 3.82 |
-| w/o outcome reward | Yes | Yes | Yes | No | Yes | Yes | 31.71 | -0.35 | 51.37 | 32.86 | 68.59 | 128.44 | 3.00 | 3.79 |
-| w/o cost/overlap | Yes | Yes | Yes | Yes | No | Yes | 31.71 | -0.35 | 51.37 | 32.86 | 68.59 | 128.44 | 3.00 | 3.87 |
-| w/o action mask | Yes | Yes | Yes | Yes | Yes | No | 31.98 | -0.08 | 52.02 | 32.99 | 70.99 | 142.45 | 2.24 | 4.86 |
+| Full RL-SAHI | Yes | Yes | Yes | Yes | Yes | Yes | 29.78 | +0.00 | 48.28 | 30.50 | 69.48 | 106.72 | 3.00 | 6.11 |
+| w/o spatial feature | No | Yes | Yes | Yes | Yes | Yes | 28.47 | -1.32 | 46.24 | 29.16 | 63.07 | 91.57 | 3.00 | 6.93 |
+| w/o detection map | Yes | No | Yes | Yes | Yes | Yes | 28.44 | -1.34 | 46.23 | 29.12 | 63.00 | 91.40 | 3.00 | 6.86 |
+| w/o history | Yes | Yes | No | Yes | Yes | Yes | 28.47 | -1.32 | 46.27 | 29.14 | 63.08 | 91.82 | 3.00 | 6.93 |
+| w/o outcome reward | Yes | Yes | Yes | No | Yes | Yes | 28.46 | -1.32 | 46.23 | 29.17 | 63.09 | 91.65 | 3.00 | 6.80 |
+| w/o cost/overlap | Yes | Yes | Yes | Yes | No | Yes | 28.46 | -1.32 | 46.23 | 29.17 | 63.09 | 91.65 | 3.00 | 6.90 |
+| w/o action mask | Yes | Yes | Yes | Yes | Yes | No | 28.45 | -1.34 | 46.26 | 29.10 | 62.88 | 90.03 | 2.24 | 8.01 |

@@ -19,6 +19,13 @@ from rl_sahi.rl.state_config import StateConfig
 from rl_sahi.rl.trainer import TrainConfig
 from rl_sahi.rl.batched_trainer import batched_train_dqn
 
+
+def _bool_value(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train DQN to choose one adaptive slice from cached YOLO state.")
     parser.add_argument("--config", type=Path, default=None)
@@ -152,6 +159,14 @@ def main() -> None:
     out_dir = cfg.path_value("dqn_out_dir") if args.out_dir is None else args.out_dir
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
+    try:
+        crop_weights = cfg.path_value("crop_weights")
+    except KeyError:
+        crop_weights = None
+    try:
+        full_weights = cfg.path_value("full_weights")
+    except KeyError:
+        full_weights = None
     checkpoint = batched_train_dqn(
         image_root=cfg.path_value("image_root"),
         cache_root=cfg.path_value("cache_root"),
@@ -195,7 +210,9 @@ def main() -> None:
             save_predictions=False,
             save_metadata=False,
             save_visualization=False,
-            batched_inference=bool(infer_cfg.get("batched_inference", False)),
+            batched_inference=_bool_value(infer_cfg.get("batched_inference", False)),
+            use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
+            nms_type=str(infer_cfg.get("nms_type", "standard")),
             class_mapping=class_mapping,
         ),
         bench_cfg=BenchmarkConfig(

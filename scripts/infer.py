@@ -103,6 +103,8 @@ def main() -> None:
             save_metadata=_bool_value(infer_cfg.get("save_metadata", True)) and not args.no_metadata,
             save_visualization=save_visualization,
             batched_inference=_bool_value(infer_cfg.get("batched_inference", False)),
+            use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
+            nms_type=str(infer_cfg.get("nms_type", "standard")),
             class_mapping=ClassMapping.from_config(cfg.section("classes")),
         ),
     )

@@ -21,7 +21,7 @@ infer:
   save_visualization: false
   batched_inference: true
   use_wbf: false
-  nms_type: "diou"
+  nms_type: "cdn"
   device: "cuda"
   policy_device: "cuda"
   feature_layers:

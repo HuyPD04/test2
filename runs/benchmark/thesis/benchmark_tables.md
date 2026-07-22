@@ -11,8 +11,8 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | ASAHI (12 slices) | ASAHI paper | 29.3 | 41.9 | 22.8 | 2.98 |
 | ASAHI (15 slices) | ASAHI paper | 27.2 | 40.9 | 21.3 | 2.39 |
 | ASAHI (adaptive) | ASAHI paper | 30.4 | 45.6 | 25.2 | 4.88 |
-| YOLO11s only | local | 25.08 | 41.82 | 25.71 | 14.67 |
-| RL-SAHI (proposed) | local | 25.24 | 42.68 | 25.64 | 4.12 |
+| YOLO11s only | local | 21.52 | 35.50 | 22.27 | 27.68 |
+| RL-SAHI (proposed) | local | 23.06 | 38.51 | 23.52 | 5.88 |
 
 > ASAHI paper values are reference-only: its TPH-YOLOv5 detector and hardware differ from the local YOLO11s pipeline, so the speed values are not controlled hardware comparisons.
 
@@ -25,46 +25,46 @@ AP and mAP denote the same COCO-style mean Average Precision in these tables. Lo
 | QueryDet (RetinaNet-50, CSQ) | 28.32 | 48.14 | 28.75 | CVPR 2022 |
 | AD-Det* (ResNeXt-101) | 37.50 | 60.90 | 39.20 | Remote Sensing 2025 |
 | TPH+ASAHI | 36.00 | 56.80 | 28.20 | arXiv:2604.19233 |
-| RL-SAHI (proposed, YOLO11s) | 32.06 | 52.55 | 32.89 | local run |
+| RL-SAHI (proposed, YOLO11s) | 29.78 | 48.28 | 30.50 | local run |
 
 ## Internal detection diagnostics - local test run
 
 | Method | Precision@0.50 | Recall@0.50 | Recall-small@0.50 | FP/image |
 |---|---:|---:|---:|---:|
-| YOLO11s only | 21.28 | 69.37 | 54.39 | 119.74 |
-| SAHI library | 14.77 | 71.87 | 56.72 | 193.51 |
+| YOLO11s only | 39.55 | 59.84 | 41.57 | 42.66 |
+| SAHI library | 28.82 | 68.91 | 52.79 | 79.37 |
 | Fixed-grid Top-K 4 | - | - | - | - |
 | Fixed-grid Top-K 6 | - | - | - | - |
 | Fixed-grid Top-K 12 | - | - | - | - |
 | Fixed-grid Top-K 15 | - | - | - | - |
-| RL-SAHI | 24.77 | 69.86 | 56.98 | 98.97 |
+| RL-SAHI | 33.44 | 66.08 | 52.10 | 61.36 |
 
 ## Internal efficiency - local test run
 
 | Method | Latency (ms/image) | Speed (img/s) | Slices/image | Detector calls/image | Effective GFLOPs |
 |---|---:|---:|---:|---:|---:|
-| YOLO11s only | 68.2 | 14.67 | 0.00 | 1.00 | 21.5 |
-| SAHI library | 184.8 | 5.41 | 6.11 | 7.11 | 152.9 |
+| YOLO11s only | 36.1 | 27.68 | 0.00 | 1.00 | 21.5 |
+| SAHI library | 145.2 | 6.89 | 6.11 | 7.11 | 152.9 |
 | Fixed-grid Top-K 4 | - | - | - | - | - |
 | Fixed-grid Top-K 6 | - | - | - | - | - |
 | Fixed-grid Top-K 12 | - | - | - | - | - |
 | Fixed-grid Top-K 15 | - | - | - | - | - |
-| RL-SAHI | 242.6 | 4.12 | 3.00 | 4.00 | 86.0 |
+| RL-SAHI | 170.1 | 5.88 | 3.00 | 4.00 | 86.0 |
 
 ## Per-class AP - proposed method
 
 | Class | Test AP | Test AP50 | Val AP | Val AP50 |
 |---|---:|---:|---:|---:|
-| 0: pedestrian | 19.89 | 46.15 | 32.52 | 64.82 |
-| 1: people | 10.00 | 26.75 | 21.16 | 50.28 |
-| 2: bicycle | 10.25 | 21.79 | 16.53 | 33.97 |
-| 3: car | 52.63 | 80.73 | 62.29 | 86.39 |
-| 4: van | 29.05 | 40.45 | 37.11 | 50.51 |
-| 5: truck | 32.05 | 48.57 | 32.38 | 47.27 |
-| 6: tricycle | 17.85 | 31.00 | 24.94 | 41.63 |
-| 7: awning-tricycle | 15.61 | 24.28 | 11.94 | 18.52 |
-| 8: bus | 44.74 | 60.60 | 49.93 | 68.04 |
-| 9: motor | 20.32 | 46.48 | 31.78 | 64.06 |
+| 0: pedestrian | 17.98 | 42.27 | 30.21 | 61.28 |
+| 1: people | 8.12 | 21.21 | 18.29 | 44.02 |
+| 2: bicycle | 7.50 | 15.97 | 13.12 | 26.63 |
+| 3: car | 50.95 | 77.82 | 61.24 | 84.36 |
+| 4: van | 25.49 | 35.89 | 35.46 | 47.88 |
+| 5: truck | 33.14 | 48.74 | 29.95 | 43.21 |
+| 6: tricycle | 15.58 | 26.24 | 20.24 | 34.42 |
+| 7: awning-tricycle | 11.25 | 17.67 | 10.15 | 16.18 |
+| 8: bus | 41.82 | 56.65 | 50.58 | 66.05 |
+| 9: motor | 18.76 | 42.66 | 28.61 | 58.74 |
 
 ## Protocol and provenance notes
 

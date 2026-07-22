@@ -104,6 +104,8 @@ def main() -> None:
             save_metadata=False,
             save_visualization=False,
             batched_inference=_bool_value(infer_cfg.get("batched_inference", False)),
+            use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
+            nms_type=str(infer_cfg.get("nms_type", "standard")),
             class_mapping=class_mapping,
         ),
         bench_cfg=BenchmarkConfig(

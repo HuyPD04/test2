@@ -27,6 +27,7 @@ from rl_sahi.inference.pipeline import (
     _filter_classes,
     _new_detection_stats,
     _skip_crop_reason,
+    filter_boundary_boxes,
     get_initial_detection,
 )
 from rl_sahi.inference.rollout import rollout_one_slice
@@ -649,6 +650,9 @@ def _predict_rl_sahi(
                     classes_i,
                     cfg.target_classes,
                 )
+                boxes_i, scores_i, classes_i = filter_boundary_boxes(
+                    boxes_i, scores_i, classes_i, roi, det.image_shape
+                )
                 new_detection_gain, new_detection_utility, new_detection_max_score = (
                     _new_detection_stats(
                         full_boxes,
@@ -757,6 +761,9 @@ def _predict_rl_sahi(
         for (roi, _info), (boxes_i, scores_i, classes_i) in zip(pending, predictions):
             classes_i = cfg.class_mapping.map_model_classes(classes_i)
             boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
+            boxes_i, scores_i, classes_i = filter_boundary_boxes(
+                boxes_i, scores_i, classes_i, roi, det.image_shape
+            )
             new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                 full_boxes,
                 full_scores,
@@ -1108,6 +1115,7 @@ def evaluate_rl_sahi_policy(
         start = time.perf_counter()
         boxes, scores, classes, accepted_crop_count, crop_count = _predict_rl_sahi(
             model,
+            full_model,
             crop_model,
             policy,
             device_t,

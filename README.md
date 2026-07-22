@@ -157,6 +157,7 @@ python scripts\build_benchmark_tables.py `
   --test-json runs\benchmark\thesis_full_test\benchmark.json `
   --val-json runs\benchmark\thesis_full_val\benchmark.json `
   --output runs\benchmark\thesis\benchmark_tables.md
+python scripts/run_component_ablation.py --config configs/benchmark_component_ablation.yaml --split val --policy-device cuda    
 ```
 
 `benchmark_thesis.yaml` follows the thesis class scope instead of the six-class training default.
