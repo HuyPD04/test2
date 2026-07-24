@@ -1,0 +1,50 @@
+benchmark:
+  output_conf: 0.01
+
+infer:
+  full_imgsz: 960
+  slice_imgsz: 512
+  full_conf: 0.01
+  output_conf: 0.3
+  iou: 0.7
+  merge_iou: 0.7
+
+test:
+Average Precision by IoU threshold (diagnostic, maxDets=500):
+  AP@0.50 = 48.22%.
+  AP@0.55 = 46.05%.
+  AP@0.60 = 43.25%.
+  AP@0.65 = 39.68%.
+  AP@0.70 = 35.06%.
+  AP@0.75 = 29.57%.
+  AP@0.80 = 23.09%.
+  AP@0.85 = 15.51%.
+  AP@0.90 = 6.97%.
+  AP@0.95 = 0.9%.
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 28.83%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 48.22%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 29.57%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.21%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 13.32%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 36.49%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 39.52%.
+
+val:
+Average Precision by IoU threshold (diagnostic, maxDets=500):
+  AP@0.50 = 54.01%.
+  AP@0.55 = 52.02%.
+  AP@0.60 = 48.9%.
+  AP@0.65 = 44.58%.
+  AP@0.70 = 38.95%.
+  AP@0.75 = 32.07%.
+  AP@0.80 = 24.09%.
+  AP@0.85 = 15.96%.
+  AP@0.90 = 8.1%.
+  AP@0.95 = 1.44%.
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 32.01%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 54.01%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 32.07%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 0.98%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 8.11%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 37.65%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 43.84%.

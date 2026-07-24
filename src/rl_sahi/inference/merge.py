@@ -12,6 +12,7 @@ DEFAULT_VEHICLE_DUPLICATE_CLASSES = (3, 4, 5, 8)  # car, van, truck, bus
 DEFAULT_CROSS_CLASS_DUPLICATE_GROUPS = (DEFAULT_VEHICLE_DUPLICATE_CLASSES,)
 DEFAULT_CROSS_CLASS_DUPLICATE_IOU = 0.85
 DEFAULT_CROSS_CLASS_DUPLICATE_IOS = 0.95
+DEFAULT_SOURCE_AWARE_SLICE_BONUS = 0.05
 
 
 def save_prediction_txt(
@@ -28,13 +29,72 @@ def save_prediction_txt(
             f.write(f"{int(cls)} {float(score):.6f} {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {int(source)}\n")
 
 
-def class_aware_nms(boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float, nms_type: str = "standard") -> np.ndarray:
+def _split_nms_type(nms_type: str) -> tuple[bool, str]:
+    name = str(nms_type).lower().replace("-", "_")
+    if name in {"source_aware", "sourceaware"}:
+        return True, "standard"
+    if name.startswith("source_aware_"):
+        return True, name.removeprefix("source_aware_") or "standard"
+    if name.endswith("_source_aware"):
+        return True, name.removesuffix("_source_aware") or "standard"
+    return False, name
+
+
+def _source_priority_scores(
+    scores: np.ndarray,
+    sources: np.ndarray,
+    slice_bonus: float = DEFAULT_SOURCE_AWARE_SLICE_BONUS,
+) -> np.ndarray:
+    scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+    sources = np.asarray(sources, dtype=np.int32).reshape(-1)
+    return scores + (sources > 0).astype(np.float32) * float(slice_bonus)
+
+
+def class_aware_nms(
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    iou_threshold: float,
+    nms_type: str = "standard",
+) -> np.ndarray:
     if len(boxes) == 0:
         return np.zeros((0,), dtype=np.int64)
+    _source_aware, base_nms_type = _split_nms_type(nms_type)
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
         idx = np.flatnonzero(classes.astype(np.int64) == cls)
-        keep_local = nms_numpy(boxes[idx], scores[idx], iou_threshold, nms_type=nms_type)
+        keep_local = nms_numpy(boxes[idx], scores[idx], iou_threshold, nms_type=base_nms_type)
+        keep_parts.append(idx[keep_local])
+    keep = np.concatenate(keep_parts, axis=0) if keep_parts else np.zeros((0,), dtype=np.int64)
+    return keep[np.argsort(scores[keep])[::-1]].astype(np.int64)
+
+
+def class_aware_nms_with_sources(
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    sources: np.ndarray,
+    iou_threshold: float,
+    nms_type: str = "standard",
+) -> np.ndarray:
+    boxes = as_boxes(boxes)
+    scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+    classes = np.asarray(classes, dtype=np.float32).reshape(-1)
+    sources = np.asarray(sources, dtype=np.int32).reshape(-1)
+    if len(boxes) == 0:
+        return np.zeros((0,), dtype=np.int64)
+    if not (len(boxes) == len(scores) == len(classes) == len(sources)):
+        raise ValueError("boxes, scores, classes, and sources must have the same length")
+
+    source_aware, base_nms_type = _split_nms_type(nms_type)
+    if not source_aware:
+        return class_aware_nms(boxes, scores, classes, iou_threshold, nms_type=base_nms_type)
+
+    keep_parts: list[np.ndarray] = []
+    for cls in np.unique(classes.astype(np.int64)):
+        idx = np.flatnonzero(classes.astype(np.int64) == cls)
+        priority_scores = _source_priority_scores(scores[idx], sources[idx])
+        keep_local = nms_numpy(boxes[idx], priority_scores, iou_threshold, nms_type=base_nms_type)
         keep_parts.append(idx[keep_local])
     keep = np.concatenate(keep_parts, axis=0) if keep_parts else np.zeros((0,), dtype=np.int64)
     return keep[np.argsort(scores[keep])[::-1]].astype(np.int64)
@@ -132,7 +192,12 @@ def merge_predictions(
     if use_wbf:
         boxes, scores, classes = weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
     else:
-        keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
+        source_aware, _base_nms_type = _split_nms_type(nms_type)
+        if source_aware:
+            sources = np.zeros((len(boxes),), dtype=np.int32)
+            keep = class_aware_nms_with_sources(boxes, scores, classes, sources, merge_iou, nms_type=nms_type)
+        else:
+            keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
         boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
     return resolve_cross_class_duplicates(boxes, scores, classes, cross_class_duplicate_iou, cross_class_duplicate_ios)
 
@@ -146,6 +211,8 @@ def merge_predictions_with_sources(
     sources_parts: list[np.ndarray],
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -158,10 +225,30 @@ def merge_predictions_with_sources(
     if len(boxes) == 0:
         return boxes, scores, classes, sources
     boxes = clip_boxes(boxes, image_shape)
-    keep = class_aware_nms(boxes, scores, classes, merge_iou)
-    boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
+    if use_wbf:
+        original_boxes = boxes.copy()
+        original_sources = sources.copy()
+        boxes, scores, classes = weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
+        sources = _assign_fused_sources(boxes, original_boxes, original_sources)
+    else:
+        keep = class_aware_nms_with_sources(boxes, scores, classes, sources, merge_iou, nms_type=nms_type)
+        boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     keep = cross_class_duplicate_keep(boxes, scores, classes, cross_class_duplicate_iou, cross_class_duplicate_ios)
     return boxes[keep], scores[keep], classes[keep], sources[keep]
+
+
+def _assign_fused_sources(
+    fused_boxes: np.ndarray,
+    original_boxes: np.ndarray,
+    original_sources: np.ndarray,
+) -> np.ndarray:
+    fused_boxes = as_boxes(fused_boxes)
+    original_boxes = as_boxes(original_boxes)
+    original_sources = np.asarray(original_sources, dtype=np.int32).reshape(-1)
+    if len(fused_boxes) == 0 or len(original_boxes) == 0:
+        return np.zeros((len(fused_boxes),), dtype=np.int32)
+    match_ious = iou_matrix(fused_boxes, original_boxes)
+    return original_sources[match_ious.argmax(axis=1)]
 
 
 def source_counts_after_merge(
@@ -175,6 +262,8 @@ def source_counts_after_merge(
     merge_iou: float,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[int, int]:
     sources_parts = [np.zeros((len(full_boxes),), dtype=np.int32)] + [
         np.full((len(boxes),), index + 1, dtype=np.int32)
@@ -189,6 +278,8 @@ def source_counts_after_merge(
         sources_parts,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
     return int((sources == 0).sum()), int((sources > 0).sum())
 
@@ -205,6 +296,8 @@ def _novel_candidate_detections_after_merge(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     before_boxes, _before_scores, before_classes = merge_predictions(
         image_shape,
@@ -212,6 +305,8 @@ def _novel_candidate_detections_after_merge(
         previous_boxes_parts,
         previous_scores_parts,
         previous_classes_parts,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
     )
@@ -237,6 +332,8 @@ def _novel_candidate_detections_after_merge(
         sources_parts,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
     candidate_mask = after_sources == 1
     if not candidate_mask.any():
@@ -277,6 +374,8 @@ def new_detection_gain_after_merge(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> int:
     gain, _utility, _max_score = new_detection_stats_after_merge(
         image_shape,
@@ -290,6 +389,8 @@ def new_detection_gain_after_merge(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
     return gain
 
@@ -306,6 +407,8 @@ def new_detection_utility_after_merge(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> float:
     _gain, utility, _max_score = new_detection_stats_after_merge(
         image_shape,
@@ -319,6 +422,8 @@ def new_detection_utility_after_merge(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
     return utility
 
@@ -335,6 +440,8 @@ def new_detection_stats_after_merge(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[int, float, float]:
     boxes, scores, _classes = _novel_candidate_detections_after_merge(
         image_shape,
@@ -348,6 +455,8 @@ def new_detection_stats_after_merge(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
     if len(boxes) == 0:
         return 0, 0.0, 0.0

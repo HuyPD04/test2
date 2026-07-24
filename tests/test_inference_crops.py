@@ -18,9 +18,43 @@ class _EmptyResult:
     speed = {"preprocess": 0.0, "inference": 0.0, "postprocess": 0.0}
 
 
+class _FakeTensor:
+    def __init__(self, values):
+        self.values = np.asarray(values, dtype=np.float32)
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.values
+
+
+class _Boxes:
+    def __init__(self):
+        self.xyxy = _FakeTensor([[1.25, 2.5, 11.75, 22.25]])
+        self.conf = _FakeTensor([0.9])
+        self.cls = _FakeTensor([3.0])
+
+    def __len__(self):
+        return 1
+
+
+class _BoxResult:
+    boxes = _Boxes()
+    speed = {"preprocess": 0.0, "inference": 0.0, "postprocess": 0.0}
+
+
 class _Model:
     def predict(self, crops, **_kwargs):
         return [_EmptyResult() for _ in crops]
+
+
+class _BoxModel:
+    def predict(self, crops, **_kwargs):
+        return [_BoxResult() for _ in crops]
 
 
 class InferenceCropTest(unittest.TestCase):
@@ -45,6 +79,29 @@ class InferenceCropTest(unittest.TestCase):
 
         imread.assert_not_called()
         self.assertEqual(len(outputs), 2)
+
+    def test_crop_boxes_are_mapped_back_with_rounded_clamped_offset(self) -> None:
+        source = np.zeros((100, 120, 3), dtype=np.uint8)
+        roi = np.asarray([10.2, 20.6, 50.7, 80.3], dtype=np.float32)
+
+        boxes, scores, classes = run_yolo_on_crops(
+            _BoxModel(),
+            [Path("image.jpg")],
+            [roi],
+            imgsz=512,
+            conf=0.05,
+            iou=0.7,
+            max_det=3000,
+            device="cpu",
+            source_image=source,
+        )[0]
+
+        np.testing.assert_allclose(
+            boxes,
+            np.asarray([[11.25, 23.5, 21.75, 43.25]], dtype=np.float32),
+        )
+        np.testing.assert_allclose(scores, np.asarray([0.9], dtype=np.float32))
+        np.testing.assert_allclose(classes, np.asarray([3.0], dtype=np.float32))
 
 
 if __name__ == "__main__":

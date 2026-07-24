@@ -33,8 +33,10 @@ from rl_sahi.common.device import resolve_torch_device
 from rl_sahi.detection.yolo import load_yolo
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.inference.crops import run_yolo_on_crops
-from rl_sahi.inference.merge import class_aware_nms, resolve_cross_class_duplicates
-from rl_sahi.common.wbf import weighted_box_fusion
+from rl_sahi.inference.merge import (
+    merge_predictions_with_sources,
+    resolve_cross_class_duplicates,
+)
 from rl_sahi.inference.pipeline import (
     _crop_rejection_reason,
     _attempt_overlap,
@@ -316,24 +318,23 @@ def _merge_predictions(
     cross_class_duplicate_iou: float | None = 0.85,
     cross_class_duplicate_ios: float | None = 0.95,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
-    scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
-    classes = np.concatenate(classes_parts, axis=0) if classes_parts else np.zeros((0,), dtype=np.float32)
-    if len(boxes) == 0:
-        return _empty_preds()
-    boxes = clip_boxes(boxes, image_shape)
-    if use_wbf:
-        boxes, scores, classes = weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
-    else:
-        keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
-        boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
-    return resolve_cross_class_duplicates(
-        boxes,
-        scores,
-        classes,
-        cross_class_duplicate_iou,
-        cross_class_duplicate_ios,
+    sources_parts = [
+        np.full((len(boxes),), 0 if index == 0 else index, dtype=np.int32)
+        for index, boxes in enumerate(boxes_parts)
+    ]
+    boxes, scores, classes, _sources = merge_predictions_with_sources(
+        image_shape,
+        merge_iou,
+        boxes_parts,
+        scores_parts,
+        classes_parts,
+        sources_parts,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
+    return boxes, scores, classes
 
 
 def _full_predictions(
@@ -647,6 +648,8 @@ def _predict_from_crop_predictions(
                 cfg.duplicate_iou,
                 cfg.cross_class_duplicate_iou,
                 cfg.cross_class_duplicate_ios,
+                use_wbf=cfg.use_wbf,
+                nms_type=cfg.nms_type,
             )
             if _crop_rejection_reason(len(boxes_i), gain, utility, max_score, cfg) is not None:
                 continue
@@ -767,7 +770,7 @@ def _predict_rl_sahi(
                 selected = select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk)
                 candidate_rois = [candidate_rois[index] for index in selected]
             predictions = run_yolo_on_crops(
-                model,
+                crop_model,
                 [image_path] * len(candidate_rois),
                 candidate_rois,
                 imgsz=cfg.slice_imgsz,
@@ -804,6 +807,8 @@ def _predict_rl_sahi(
                         cfg.duplicate_iou,
                         cfg.cross_class_duplicate_iou,
                         cfg.cross_class_duplicate_ios,
+                        use_wbf=cfg.use_wbf,
+                        nms_type=cfg.nms_type,
                     )
                 )
                 if _crop_rejection_reason(
@@ -918,6 +923,8 @@ def _predict_rl_sahi(
                 cfg.duplicate_iou,
                 cfg.cross_class_duplicate_iou,
                 cfg.cross_class_duplicate_ios,
+                use_wbf=cfg.use_wbf,
+                nms_type=cfg.nms_type,
             )
             if _crop_rejection_reason(
                 len(boxes_i),

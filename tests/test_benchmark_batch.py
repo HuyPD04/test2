@@ -51,13 +51,14 @@ class BenchmarkBatchInferenceTest(unittest.TestCase):
             patch(
                 "rl_sahi.eval.benchmark.run_yolo_on_crops",
                 return_value=[_empty_prediction() for _ in rois],
-            ) as predict_crops,
+        ) as predict_crops,
         ):
             model = object()
+            crop_model = object()
             _boxes, _scores, _classes, accepted, inferred = _predict_rl_sahi(
                 model=model,
                 full_model=model,
-                crop_model=object(),
+                crop_model=crop_model,
                 policy=object(),
                 device_t=object(),
                 image_path=Path("image.jpg"),
@@ -72,6 +73,7 @@ class BenchmarkBatchInferenceTest(unittest.TestCase):
             )
 
         self.assertEqual(predict_crops.call_count, 1)
+        self.assertIs(predict_crops.call_args.args[0], crop_model)
         self.assertEqual(len(predict_crops.call_args.args[1]), 3)
         self.assertEqual(len(predict_crops.call_args.args[2]), 3)
         self.assertEqual(inferred, 3)

@@ -1,10 +1,10 @@
 infer:
-  full_imgsz: 736
+  full_imgsz: 960
   slice_imgsz: 512
   full_conf: 0.01
   output_conf: 0.3
   iou: 0.7
-  merge_iou: 0.55
+  merge_iou: 0.7
   max_det: 3000
   min_slice_detections: 1
   min_slice_utility: 0.3
@@ -23,7 +23,7 @@ infer:
   save_visualization: false
   batched_inference: true
   use_wbf: false
-  nms_type: "cdn"
+  nms_type: "source_aware_cdn"
   device: "cuda"
   policy_device: "cuda"
   feature_layers:
@@ -31,7 +31,7 @@ infer:
   use_cache: true
 
 benchmark:
-  output_conf: 0.05
+  output_conf: 0.01
   iou_threshold: 0.5
   eval_max_detections: 500
   ignore_overlap_threshold: 0.5

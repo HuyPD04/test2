@@ -12,9 +12,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from rl_sahi.inference.merge import (
     accepts_novel_detections,
     merge_predictions,
+    merge_predictions_with_sources,
     new_detection_gain_after_merge,
     new_detection_stats_after_merge,
     new_detection_utility_after_merge,
+    source_counts_after_merge,
 )
 
 
@@ -145,6 +147,106 @@ class MergeGainTest(unittest.TestCase):
 
     def test_multiple_weak_detections_do_not_pass_score_gate(self) -> None:
         self.assertFalse(accepts_novel_detections(2, 0.8, 0.4, 1, 0.8, 0.45))
+
+    def test_source_counts_respect_configured_nms_type(self) -> None:
+        full_boxes = np.array([[0.0, 0.0, 10.0, 10.0]], dtype=np.float32)
+        slice_boxes = np.array([[1.8, 1.8, 11.8, 11.8]], dtype=np.float32)
+        full_scores = np.array([0.9], dtype=np.float32)
+        slice_scores = np.array([0.8], dtype=np.float32)
+        full_classes = np.array([0.0], dtype=np.float32)
+        slice_classes = np.array([0.0], dtype=np.float32)
+
+        standard_counts = source_counts_after_merge(
+            full_boxes,
+            full_scores,
+            full_classes,
+            [slice_boxes],
+            [slice_scores],
+            [slice_classes],
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+        )
+        cdn_counts = source_counts_after_merge(
+            full_boxes,
+            full_scores,
+            full_classes,
+            [slice_boxes],
+            [slice_scores],
+            [slice_classes],
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            nms_type="cdn",
+        )
+
+        self.assertEqual(standard_counts, (1, 0))
+        self.assertEqual(cdn_counts, (1, 1))
+
+    def test_source_aware_nms_prefers_slice_when_scores_are_close(self) -> None:
+        full_box = np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32)
+        slice_box = np.array([[10.5, 10.5, 30.5, 30.5]], dtype=np.float32)
+
+        boxes, scores, classes, sources = merge_predictions_with_sources(
+            image_shape=(100, 100),
+            merge_iou=0.7,
+            boxes_parts=[full_box, slice_box],
+            scores_parts=[
+                np.array([0.90], dtype=np.float32),
+                np.array([0.86], dtype=np.float32),
+            ],
+            classes_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([0.0], dtype=np.float32),
+            ],
+            sources_parts=[
+                np.array([0], dtype=np.int32),
+                np.array([1], dtype=np.int32),
+            ],
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            nms_type="source_aware_cdn",
+        )
+
+        self.assertEqual(len(boxes), 1)
+        np.testing.assert_allclose(boxes[0], slice_box[0], rtol=1e-6, atol=1e-6)
+        self.assertAlmostEqual(float(scores[0]), 0.86, places=6)
+        self.assertEqual(int(classes[0]), 0)
+        self.assertEqual(int(sources[0]), 1)
+
+    def test_merge_with_sources_uses_wbf_source_assignment(self) -> None:
+        full_box = np.array([[0.0, 0.0, 10.0, 10.0]], dtype=np.float32)
+        slice_box = np.array([[1.0, 1.0, 11.0, 11.0]], dtype=np.float32)
+        full_score = np.array([0.5], dtype=np.float32)
+        slice_score = np.array([0.9], dtype=np.float32)
+
+        boxes, scores, classes, sources = merge_predictions_with_sources(
+            image_shape=(100, 100),
+            merge_iou=0.5,
+            boxes_parts=[full_box, slice_box],
+            scores_parts=[full_score, slice_score],
+            classes_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([0.0], dtype=np.float32),
+            ],
+            sources_parts=[
+                np.array([0], dtype=np.int32),
+                np.array([1], dtype=np.int32),
+            ],
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            use_wbf=True,
+            nms_type="cdn",
+        )
+
+        expected_box = (full_box[0] * 0.5 + slice_box[0] * 0.9) / 1.4
+        self.assertEqual(len(boxes), 1)
+        np.testing.assert_allclose(boxes[0], expected_box, rtol=1e-6, atol=1e-6)
+        self.assertAlmostEqual(float(scores[0]), 0.9, places=6)
+        self.assertEqual(int(classes[0]), 0)
+        self.assertEqual(int(sources[0]), 1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+paths:
+  weights: yolo11s.pt
+  full_weights: yolo11l.pt
+  crop_weights: best_visdrone.pt
+  image_root: data/raw/images
+  label_root: data/raw/labels
+  annotation_root: data/raw
+  cache_root: data/cache
+  dqn_out_dir: runs/dqn
+  infer_out_dir: runs/infer
+  checkpoint: runs/dqn/best.pt
+
+Test:
+    Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 26.98%.
+    Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 45.27%.
+    Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 27.61%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.21%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 13.03%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 34.23%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 35.53%.
+Val:
+    Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 29.91%.
+    Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 51.04%.
+    Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 29.58%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 1.02%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 8.06%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 36.02%.
+    Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 39.33%.

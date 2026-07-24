@@ -1,0 +1,33 @@
+infer:
+  full_imgsz: 800
+paths:
+  weights: yolo11s.pt
+  full_weights: yolo11l.pt
+  crop_weights: yolo11s.pt
+  image_root: data/raw/images
+  label_root: data/raw/labels
+  annotation_root: data/raw
+  cache_root: data/cache
+  dqn_out_dir: runs/dqn
+  infer_out_dir: runs/infer
+  checkpoint: runs/dqn/best.pt
+
+
+test:
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 27.61%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 46.1%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 28.38%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.24%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 13.31%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 34.96%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 36.35%.
+
+val:
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 30.78%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 52.39%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 30.35%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 0.87%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 8.09%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 36.94%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 40.3%.
+

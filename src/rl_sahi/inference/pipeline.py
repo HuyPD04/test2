@@ -30,8 +30,7 @@ from rl_sahi.inference.merge import (
     DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     accepts_novel_detections,
-    class_aware_nms,
-    cross_class_duplicate_keep,
+    merge_predictions_with_sources,
     new_detection_gain_after_merge,
     new_detection_stats_after_merge,
     new_detection_utility_after_merge,
@@ -39,7 +38,6 @@ from rl_sahi.inference.merge import (
     save_prediction_txt,
     source_counts_after_merge,
 )
-from rl_sahi.common.wbf import weighted_box_fusion
 from rl_sahi.inference.rollout import rollout_one_slice
 from rl_sahi.inference.roi_prefilter import score_roi_candidates, select_roi_candidates
 from rl_sahi.inference.visualize import save_inference_visual
@@ -104,6 +102,8 @@ def _merged_source_counts(
     merge_iou: float,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[int, int]:
     return source_counts_after_merge(
         full_boxes,
@@ -116,6 +116,8 @@ def _merged_source_counts(
         merge_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
 
 
@@ -134,6 +136,8 @@ def _new_detection_gain(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> int:
     return new_detection_gain_after_merge(
         image_shape,
@@ -147,6 +151,8 @@ def _new_detection_gain(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
 
 
@@ -165,6 +171,8 @@ def _new_detection_utility(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> float:
     return new_detection_utility_after_merge(
         image_shape,
@@ -178,6 +186,8 @@ def _new_detection_utility(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
 
 
@@ -196,6 +206,8 @@ def _new_detection_stats(
     duplicate_iou: float | None = None,
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    use_wbf: bool = False,
+    nms_type: str = "standard",
 ) -> tuple[int, float, float]:
     return new_detection_stats_after_merge(
         image_shape,
@@ -209,6 +221,8 @@ def _new_detection_stats(
         duplicate_iou=duplicate_iou,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        use_wbf=use_wbf,
+        nms_type=nms_type,
     )
 
 
@@ -717,6 +731,8 @@ def _infer_with_loaded(
                     cfg.duplicate_iou,
                     cfg.cross_class_duplicate_iou,
                     cfg.cross_class_duplicate_ios,
+                    use_wbf=cfg.use_wbf,
+                    nms_type=cfg.nms_type,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -874,6 +890,8 @@ def _infer_with_loaded(
                     cfg.duplicate_iou,
                     cfg.cross_class_duplicate_iou,
                     cfg.cross_class_duplicate_ios,
+                    use_wbf=cfg.use_wbf,
+                    nms_type=cfg.nms_type,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -923,38 +941,18 @@ def _infer_with_loaded(
         for index, boxes_i in enumerate(slice_boxes_all)
     ]
 
-    boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
-    scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
-    classes = np.concatenate(classes_parts, axis=0) if classes_parts else np.zeros((0,), dtype=np.float32)
-    sources = np.concatenate(sources_parts, axis=0) if sources_parts else np.zeros((0,), dtype=np.int32)
-
-    boxes = clip_boxes(boxes, det.image_shape)
-
-    if cfg.use_wbf:
-        boxes, scores, classes = weighted_box_fusion(
-            [boxes], [scores], [classes], iou_threshold=cfg.merge_iou,
-        )
-        # Re-derive sources: for each fused box, find the closest original box
-        # and assign its source.
-        orig_boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
-        orig_sources = sources.copy()
-        if len(boxes) > 0 and len(orig_boxes) > 0:
-            from rl_sahi.common.box_geometry import iou_matrix as _iou_matrix
-            match_ious = _iou_matrix(boxes, clip_boxes(orig_boxes, det.image_shape))
-            sources = orig_sources[match_ious.argmax(axis=1)]
-        else:
-            sources = np.zeros((len(boxes),), dtype=np.int32)
-    else:
-        keep = class_aware_nms(boxes, scores, classes, cfg.merge_iou, nms_type=cfg.nms_type)
-        boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
-    keep = cross_class_duplicate_keep(
-        boxes,
-        scores,
-        classes,
-        cfg.cross_class_duplicate_iou,
-        cfg.cross_class_duplicate_ios,
+    boxes, scores, classes, sources = merge_predictions_with_sources(
+        det.image_shape,
+        cfg.merge_iou,
+        boxes_parts,
+        scores_parts,
+        classes_parts,
+        sources_parts,
+        cross_class_duplicate_iou=cfg.cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
+        use_wbf=cfg.use_wbf,
+        nms_type=cfg.nms_type,
     )
-    boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 
     out_dir = Path(out_dir)
