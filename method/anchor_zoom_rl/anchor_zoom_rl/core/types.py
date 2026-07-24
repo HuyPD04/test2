@@ -82,4 +82,5 @@ class StepOutcome:
     hard_tp_gain: int
     fp_gain: int
     small_tp_gain: int
+    hard_coverage_gain: int
     reason: str

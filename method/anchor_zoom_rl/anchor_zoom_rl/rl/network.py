@@ -24,9 +24,23 @@ class DuelingQNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, action_dim),
         )
+        self.hardness = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, action_dim),
+        )
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         encoded = self.encoder(state)
+        return self._q_values(encoded)
+
+    def forward_with_hardness(
+        self, state: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        encoded = self.encoder(state)
+        return self._q_values(encoded), self.hardness(encoded)
+
+    def _q_values(self, encoded: torch.Tensor) -> torch.Tensor:
         value = self.value(encoded)
         advantage = self.advantage(encoded)
         return value + advantage - advantage.mean(dim=1, keepdim=True)

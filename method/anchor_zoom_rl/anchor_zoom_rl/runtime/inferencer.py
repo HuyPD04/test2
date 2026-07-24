@@ -22,6 +22,7 @@ from .prediction import DetectionRunner
 class InferenceResult:
     image_path: Path
     detections: Detections
+    full_detections: Detections
     attempted_rois: list[np.ndarray]
     accepted_rois: list[np.ndarray]
     actions: list[dict[str, Any]]
@@ -60,7 +61,10 @@ class AnchorZoomInferencer:
         checkpoint_path = Path(checkpoint or cfg.paths.checkpoint)
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Policy checkpoint does not exist: {checkpoint_path}")
-        self.agent.load(checkpoint_path, load_optimizer=False)
+        payload = self.agent.load(checkpoint_path, load_optimizer=False)
+        self.hardness_trained = int(
+            payload.get("training_schema_version", 1)
+        ) >= 3
         self.agent.online.eval()
 
     def infer_image(
@@ -114,11 +118,26 @@ class AnchorZoomInferencer:
             mask = environment.action_mask()
             state_ms += (time.perf_counter() - state_start) * 1000.0
             policy_start = time.perf_counter()
-            action = self.agent.select_action(state, mask, epsilon=0.0)
+            action, hard_probabilities = self.agent.select_action_with_hardness(
+                state, mask
+            )
             policy_ms += (time.perf_counter() - policy_start) * 1000.0
             if action == environment.stop_action:
                 stop_reason = "policy_stop"
-                actions.append({"action": int(action), "type": "stop"})
+                valid_crop = np.asarray(mask, dtype=bool).copy()
+                valid_crop[environment.stop_action] = False
+                max_hardness = (
+                    float(hard_probabilities[valid_crop].max())
+                    if self.hardness_trained and valid_crop.any()
+                    else None
+                )
+                actions.append(
+                    {
+                        "action": int(action),
+                        "type": "stop",
+                        "max_predicted_hardness": max_hardness,
+                    }
+                )
                 break
 
             roi = environment.roi_for_action(action)
@@ -134,7 +153,14 @@ class AnchorZoomInferencer:
             crop_cache_hits += int(cache_hit)
             decision_start = time.perf_counter()
             crop = crop.filter_score(self.cfg.detector.output_confidence)
-            utility = crop_utility(crop, predictions, self.cfg.detector.duplicate_iou)
+            utility = crop_utility(
+                crop,
+                predictions,
+                self.cfg.detector.duplicate_iou,
+                self.cfg.reward.refinement_iou,
+                self.cfg.reward.refinement_score_ratio,
+                self.cfg.reward.refinement_utility_weight,
+            )
             anchor_index, zoom_index = environment.decode_action(action)
             reliability = crop_reliability(
                 crop,
@@ -143,6 +169,8 @@ class AnchorZoomInferencer:
                 anchor_score=environment.anchors[anchor_index].score,
                 history_overlap=overlap,
                 duplicate_iou=self.cfg.detector.duplicate_iou,
+                refinement_iou=self.cfg.reward.refinement_iou,
+                refinement_score_ratio=self.cfg.reward.refinement_score_ratio,
             )
             accepted = (
                 len(crop) >= self.cfg.reward.min_crop_detections
@@ -181,6 +209,11 @@ class AnchorZoomInferencer:
                     "crop_detections": len(crop),
                     "utility": float(utility),
                     "reliability": float(reliability),
+                    "predicted_hardness": (
+                        float(hard_probabilities[action])
+                        if self.hardness_trained
+                        else None
+                    ),
                     "accepted": bool(accepted),
                     "cache_hit": bool(cache_hit),
                 }
@@ -193,6 +226,7 @@ class AnchorZoomInferencer:
         result = InferenceResult(
             image_path=image_path,
             detections=predictions,
+            full_detections=full,
             attempted_rois=list(environment.attempted_rois),
             accepted_rois=list(environment.accepted_rois),
             actions=actions,

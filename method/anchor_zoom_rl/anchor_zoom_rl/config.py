@@ -76,24 +76,31 @@ class RewardConfig:
     small_area_ratio: float = 0.0025
     min_crop_detections: int = 1
     min_utility: float = 0.15
-    min_reliability: float = 0.30
+    min_reliability: float = 0.25
+    refinement_iou: float = 0.60
+    refinement_score_ratio: float = 0.90
+    refinement_utility_weight: float = 0.35
     utility_weight: float = 0.5
     tp_weight: float = 2.0
-    hard_tp_weight: float = 0.75
+    hard_tp_weight: float = 1.25
     small_tp_weight: float = 0.5
     fp_weight: float = 1.25
     crop_cost: float = 0.50
     overlap_penalty: float = 0.5
     empty_penalty: float = 0.8
     rejected_penalty: float = 0.5
+    hard_coverage_weight: float = 0.10
+    hard_coverage_max_bonus: float = 1.0
     stop_bonus: float = 0.25
     stop_early_penalty: float = 0.50
-    stop_hard_early_penalty: float = 0.75
+    stop_hard_base_penalty: float = 1.0
+    stop_hard_per_gt: float = 0.15
+    stop_hard_max_penalty: float = 4.0
 
 
 @dataclass(slots=True)
 class TrainConfig:
-    episodes: int = 15000
+    episodes: int = 20000
     batch_size: int = 256
     replay_size: int = 50000
     min_replay: int = 1000
@@ -101,6 +108,8 @@ class TrainConfig:
     n_step: int = 3
     learning_rate: float = 0.0001
     hidden_dim: int = 512
+    hard_aux_loss_weight: float = 0.20
+    hard_aux_positive_weight_max: float = 8.0
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
     epsilon_decay_steps: int = 30000
@@ -110,10 +119,11 @@ class TrainConfig:
     checkpoint_interval: int = 250
     log_interval: int = 25
     eval_interval: int = 1000
-    eval_images: int = 256
+    eval_images: int = 512
     eval_ap_weight: float = 1.0
+    eval_hard_recall_weight: float = 0.05
     eval_fp_per_image_weight: float = 0.002
-    eval_crop_weight: float = 0.02
+    eval_crop_weight: float = 0.005
     reward_clip: float = 10.0
     sampling_mode: str = "shuffled_epochs"
     seed: int = 42
@@ -220,6 +230,23 @@ def load_config(path: str | Path) -> MethodConfig:
         raise ValueError("anchors.top_k and anchors.zoom_bins must define a non-empty action space")
     if cfg.environment.max_crops <= 0:
         raise ValueError("environment.max_crops must be positive")
+    if not 0.0 <= cfg.reward.min_reliability <= 1.0:
+        raise ValueError("reward.min_reliability must be in [0, 1]")
+    if cfg.reward.refinement_score_ratio <= 0.0:
+        raise ValueError("reward.refinement_score_ratio must be positive")
+    if cfg.reward.refinement_iou < cfg.detector.merge_iou:
+        raise ValueError(
+            "reward.refinement_iou must be at least detector.merge_iou"
+        )
+    if cfg.reward.stop_hard_max_penalty < cfg.reward.stop_hard_base_penalty:
+        raise ValueError(
+            "reward.stop_hard_max_penalty must be at least "
+            "reward.stop_hard_base_penalty"
+        )
+    if cfg.train.hard_aux_loss_weight < 0.0:
+        raise ValueError("train.hard_aux_loss_weight cannot be negative")
+    if cfg.train.hard_aux_positive_weight_max < 1.0:
+        raise ValueError("train.hard_aux_positive_weight_max must be at least 1")
     if cfg.train.sampling_mode not in {
         "shuffled_epochs",
         "random_with_replacement",

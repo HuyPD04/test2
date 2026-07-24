@@ -63,23 +63,24 @@ python scripts/precompute.py --split val
 Train:
 
 ```powershell
-python scripts/train.py --episodes 15000 --out-dir runs/rebalanced_v2
+python scripts/train.py --episodes 20000 --out-dir runs/hard_aware_v3
 ```
 
 Resume từ `runs/checkpoints/latest.pt`:
 
 ```powershell
-python scripts/train.py --episodes 20000 --out-dir runs/rebalanced_v2 --resume
+python scripts/train.py --episodes 25000 --out-dir runs/hard_aware_v3 --resume
 ```
 
 Train mặc định dùng `shuffled_epochs`: mọi ảnh được lấy đúng một lần trước khi
-bắt đầu epoch kế tiếp. Với 6.471 ảnh train, 15.000 episode tương đương khoảng
-2,3 epoch. Không resume checkpoint 5.000 episode cũ sau khi đổi reward; hãy
-precompute hard region lại rồi train mới.
+bắt đầu epoch kế tiếp. Với 6.471 ảnh train, 20.000 episode tương đương khoảng
+3,1 epoch. Không resume checkpoint schema 2 sau khi đổi reward/network; hãy dùng
+run directory mới. Cache hợp lệ được nhận diện bằng signature và có thể tái sử dụng.
 
-Mỗi 1.000 episode, policy được đánh giá trên 256 ảnh val lấy stratified theo
-sequence. `best.pt` được chọn bằng AP50 có phạt FP/ảnh và số crop; toàn bộ lịch
-sử validation được lưu trong `runs/eval.csv`.
+Mỗi 1.000 episode, policy được đánh giá trên 512 ảnh val lấy stratified theo
+sequence. `best.pt` là alias của `best_tradeoff.pt`; `best_ap.pt` và
+`best_hard_recall.pt` được lưu độc lập. Toàn bộ lịch sử validation được lưu
+trong `runs/eval.csv`.
 
 Mỗi run phải dùng một `--out-dir` riêng. Fresh train sẽ dừng nếu thư mục đã có
 `train.csv` hoặc `latest.pt`, tránh nối log/checkpoint của hai reward config.
@@ -126,6 +127,29 @@ Nếu môi trường chỉ có runtime dependencies và chưa cài `pytest`:
 python scripts/smoke_test.py
 ```
 
+## Training schema 3
+
+Schema 3 changes the replay targets, reward, and network architecture. Start a fresh
+run; do not resume a schema 2 checkpoint. Legacy checkpoints remain loadable for
+inference through the unchanged Q head.
+
+The hard-action auxiliary head predicts whether each valid `anchor x zoom` action
+contains an unmatched hard object. Its target is available only during training
+from the hard-region cache. Inference uses the learned shared representation and
+does not require labels.
+
+Validation writes hard recall, attempted/accepted hard coverage, and method
+latency to `eval.csv`. Checkpoints are saved as:
+
+```text
+checkpoints/
+  best.pt                 alias of best_tradeoff.pt
+  best_tradeoff.pt        AP50 + hard recall - FP/crop cost
+  best_ap.pt              highest AP50
+  best_hard_recall.pt     highest hard-region recall
+  latest.pt               resumable state with replay
+```
+
 ## Cache
 
 Dataset mặc định được đọc từ `D:\RL-SAHI\data\raw`. Tất cả cache nằm dưới
@@ -147,15 +171,16 @@ qua cache cũ.
 
 Một GT được xem là hard khi full-image detector không match đúng class tại
 `reward.match_iou`, hoặc match có score thấp hơn
-`reward.hard_low_confidence`. Crop chỉ nhận `hard_tp_weight` khi detection sau
-merge thực sự phục hồi hard GT. ROI chỉ chồng lên hard region nhưng không tạo TP
-thì không được thưởng.
+`reward.hard_low_confidence`. Crop nhận bonus lớn `hard_tp_weight` khi detection
+sau merge thực sự phục hồi hard GT. Lần đầu policy phủ một hard GT còn unmatched
+nhận thêm shaping reward nhỏ, bị chặn bởi `hard_coverage_max_bonus`, để học đúng
+vùng mà không thay thế mục tiêu detection.
 
 Reward n-step đưa vào replay được clip ở `[-10, 10]`. Crop còn phải vượt
-`reward.min_reliability`; reliability kết hợp confidence của detection mới,
-anchor score, boundary ratio và overlap history. Sau class-aware NMS, các box
-khác class gần như trùng nhau được loại bằng `detector.cross_class_iou` và
-`detector.cross_class_ios`.
+`reward.min_reliability`; reliability kết hợp cả detection mới và refinement
+của detection cũ, anchor score, boundary ratio và overlap history. Sau
+class-aware NMS, các box khác class gần như trùng nhau được loại bằng
+`detector.cross_class_iou` và `detector.cross_class_ios`.
 
 ## Ghi chú đánh giá
 

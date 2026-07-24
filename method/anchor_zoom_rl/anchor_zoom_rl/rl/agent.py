@@ -38,6 +38,8 @@ class DQNAgent:
         self.target.eval()
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=cfg.learning_rate)
         self.optimization_steps = 0
+        self.last_td_loss = 0.0
+        self.last_hard_aux_loss = 0.0
 
     def epsilon(self, environment_steps: int) -> float:
         progress = min(max(environment_steps, 0) / max(self.cfg.epsilon_decay_steps, 1), 1.0)
@@ -63,6 +65,28 @@ class DQNAgent:
             mask = torch.as_tensor(valid_mask, dtype=torch.bool, device=self.device)
             q_values = q_values.masked_fill(~mask, torch.finfo(q_values.dtype).min)
             return int(torch.argmax(q_values).item())
+
+    def select_action_with_hardness(
+        self,
+        state: np.ndarray,
+        valid_mask: np.ndarray,
+    ) -> tuple[int, np.ndarray]:
+        with torch.no_grad():
+            tensor = torch.as_tensor(
+                state, dtype=torch.float32, device=self.device
+            ).unsqueeze(0)
+            q_values, hard_logits = self.online.forward_with_hardness(tensor)
+            mask = torch.as_tensor(
+                valid_mask, dtype=torch.bool, device=self.device
+            )
+            masked_q = q_values[0].masked_fill(
+                ~mask, torch.finfo(q_values.dtype).min
+            )
+            action = int(torch.argmax(masked_q).item())
+            probabilities = (
+                torch.sigmoid(hard_logits[0]).cpu().numpy().astype(np.float32)
+            )
+            return action, probabilities
 
     def optimize(self, replay: ReplayBuffer) -> float | None:
         if len(replay) < max(self.cfg.min_replay, self.cfg.batch_size):
@@ -91,7 +115,8 @@ class DQNAgent:
             [item.discount for item in batch], dtype=torch.float32, device=self.device
         )
 
-        predicted = self.online(states).gather(1, actions[:, None]).squeeze(1)
+        q_values, hard_logits = self.online.forward_with_hardness(states)
+        predicted = q_values.gather(1, actions[:, None]).squeeze(1)
         with torch.no_grad():
             online_next = self.online(next_states).masked_fill(
                 ~next_masks, torch.finfo(torch.float32).min
@@ -99,14 +124,54 @@ class DQNAgent:
             next_actions = online_next.argmax(dim=1)
             target_next = self.target(next_states).gather(1, next_actions[:, None]).squeeze(1)
             expected = rewards + discounts * target_next
-        loss = F.smooth_l1_loss(predicted, expected)
+        td_loss = F.smooth_l1_loss(predicted, expected)
+        hard_targets, hard_target_mask = self._hard_target_batch(batch)
+        if bool(hard_target_mask.any()):
+            selected_logits = hard_logits[hard_target_mask]
+            selected_targets = hard_targets[hard_target_mask]
+            positives = selected_targets.sum()
+            negatives = selected_targets.numel() - positives
+            positive_weight = torch.clamp(
+                negatives / torch.clamp(positives, min=1.0),
+                min=1.0,
+                max=float(self.cfg.hard_aux_positive_weight_max),
+            )
+            hard_aux_loss = F.binary_cross_entropy_with_logits(
+                selected_logits,
+                selected_targets,
+                pos_weight=positive_weight,
+            )
+        else:
+            hard_aux_loss = torch.zeros((), dtype=td_loss.dtype, device=self.device)
+        loss = td_loss + float(self.cfg.hard_aux_loss_weight) * hard_aux_loss
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.online.parameters(), self.cfg.gradient_clip)
         self.optimizer.step()
         self.optimization_steps += 1
+        self.last_td_loss = float(td_loss.detach().cpu().item())
+        self.last_hard_aux_loss = float(hard_aux_loss.detach().cpu().item())
         self._update_target()
         return float(loss.detach().cpu().item())
+
+    def _hard_target_batch(
+        self, batch: list
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        targets = np.zeros((len(batch), self.action_dim), dtype=np.float32)
+        masks = np.zeros((len(batch), self.action_dim), dtype=bool)
+        for index, item in enumerate(batch):
+            if item.hard_targets is None or item.hard_target_mask is None:
+                continue
+            values = np.asarray(item.hard_targets, dtype=np.float32).reshape(-1)
+            valid = np.asarray(item.hard_target_mask, dtype=bool).reshape(-1)
+            if len(values) != self.action_dim or len(valid) != self.action_dim:
+                raise ValueError("Hard-action targets must match the action dimension")
+            targets[index] = values
+            masks[index] = valid
+        return (
+            torch.as_tensor(targets, dtype=torch.float32, device=self.device),
+            torch.as_tensor(masks, dtype=torch.bool, device=self.device),
+        )
 
     def _update_target(self) -> None:
         tau = float(self.cfg.soft_update_tau)
@@ -126,17 +191,19 @@ class DQNAgent:
         environment_steps: int,
         replay: ReplayBuffer | None = None,
         best_score: float | None = None,
+        best_metrics: dict[str, float] | None = None,
         training_schema_version: int | None = None,
     ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": 2,
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
             "episode": int(episode),
             "environment_steps": int(environment_steps),
             "optimization_steps": int(self.optimization_steps),
             "best_score": best_score,
+            "best_metrics": dict(best_metrics or {}),
             "online": self.online.state_dict(),
             "target": self.target.state_dict(),
             "optimizer": self.optimizer.state_dict(),
@@ -161,11 +228,25 @@ class DQNAgent:
             raise ValueError(
                 "Checkpoint action/state dimensions do not match the current anchor configuration"
             )
-        self.online.load_state_dict(payload["online"])
-        self.target.load_state_dict(payload.get("target", payload["online"]))
+        self._load_network_state(self.online, payload["online"])
+        self._load_network_state(
+            self.target, payload.get("target", payload["online"])
+        )
         if load_optimizer and "optimizer" in payload:
             self.optimizer.load_state_dict(payload["optimizer"])
         self.optimization_steps = int(payload.get("optimization_steps", 0))
         if replay is not None and "replay" in payload:
             replay.load_state_dict(payload["replay"])
         return payload
+
+    @staticmethod
+    def _load_network_state(network: DuelingQNetwork, state: dict) -> None:
+        incompatible = network.load_state_dict(state, strict=False)
+        invalid_missing = [
+            key for key in incompatible.missing_keys if not key.startswith("hardness.")
+        ]
+        if invalid_missing or incompatible.unexpected_keys:
+            raise ValueError(
+                "Checkpoint network structure is incompatible: "
+                f"missing={invalid_missing}, unexpected={incompatible.unexpected_keys}"
+            )

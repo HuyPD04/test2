@@ -117,27 +117,36 @@ def crop_reliability(
     anchor_score: float,
     history_overlap: float,
     duplicate_iou: float,
+    refinement_iou: float | None = None,
+    refinement_score_ratio: float = 0.90,
     boundary_margin: float = 0.04,
 ) -> float:
-    novel = novel_detection_mask(crop, current, duplicate_iou)
-    if not novel.any():
+    novel, refinement = crop_evidence_masks(
+        crop,
+        current,
+        duplicate_iou,
+        refinement_iou,
+        refinement_score_ratio,
+    )
+    useful = novel | refinement
+    if not useful.any():
         return 0.0
-    novel_boxes = crop.boxes[novel]
-    novel_scores = crop.scores[novel]
+    useful_boxes = crop.boxes[useful]
+    useful_scores = crop.scores[useful]
     roi = np.asarray(roi, dtype=np.float32)
     width = max(float(roi[2] - roi[0]), 1.0)
     height = max(float(roi[3] - roi[1]), 1.0)
     margin_x = width * float(boundary_margin)
     margin_y = height * float(boundary_margin)
     boundary = (
-        (novel_boxes[:, 0] <= roi[0] + margin_x)
-        | (novel_boxes[:, 1] <= roi[1] + margin_y)
-        | (novel_boxes[:, 2] >= roi[2] - margin_x)
-        | (novel_boxes[:, 3] >= roi[3] - margin_y)
+        (useful_boxes[:, 0] <= roi[0] + margin_x)
+        | (useful_boxes[:, 1] <= roi[1] + margin_y)
+        | (useful_boxes[:, 2] >= roi[2] - margin_x)
+        | (useful_boxes[:, 3] >= roi[3] - margin_y)
     )
     reliability = (
-        0.55 * float(novel_scores.mean())
-        + 0.20 * float(novel_scores.max())
+        0.55 * float(useful_scores.mean())
+        + 0.20 * float(useful_scores.max())
         + 0.15 * float(np.clip(anchor_score, 0.0, 1.0))
         + 0.10 * (1.0 - float(np.clip(history_overlap, 0.0, 1.0)))
         - 0.25 * float(boundary.mean())
@@ -145,13 +154,68 @@ def crop_reliability(
     return float(np.clip(reliability, 0.0, 1.0))
 
 
-def crop_utility(crop: Detections, current: Detections, duplicate_iou: float) -> float:
+def crop_utility(
+    crop: Detections,
+    current: Detections,
+    duplicate_iou: float,
+    refinement_iou: float | None = None,
+    refinement_score_ratio: float = 0.90,
+    refinement_weight: float = 0.35,
+) -> float:
     if len(crop) == 0:
         return 0.0
-    novel = novel_detection_mask(crop, current, duplicate_iou)
-    if not novel.any():
+    novel, refinement = crop_evidence_masks(
+        crop,
+        current,
+        duplicate_iou,
+        refinement_iou,
+        refinement_score_ratio,
+    )
+    if not novel.any() and not refinement.any():
         return 0.0
-    return float(np.sum(crop.scores[novel]) / max(np.sqrt(float(novel.sum())), 1.0))
+    novel_utility = float(
+        np.sum(crop.scores[novel]) / max(np.sqrt(float(novel.sum())), 1.0)
+    )
+    refinement_utility = float(
+        np.sum(crop.scores[refinement])
+        / max(np.sqrt(float(refinement.sum())), 1.0)
+    )
+    return novel_utility + float(refinement_weight) * refinement_utility
+
+
+def crop_evidence_masks(
+    crop: Detections,
+    current: Detections,
+    duplicate_iou: float,
+    refinement_iou: float | None,
+    refinement_score_ratio: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    novel = np.ones((len(crop),), dtype=bool)
+    refinement = np.zeros((len(crop),), dtype=bool)
+    for class_id in np.unique(crop.classes):
+        crop_indices = np.flatnonzero(crop.classes == class_id)
+        current_indices = np.flatnonzero(current.classes == class_id)
+        if len(current_indices) == 0:
+            continue
+        overlaps = iou_matrix(crop.boxes[crop_indices], current.boxes[current_indices])
+        best_local = overlaps.argmax(axis=1)
+        best_overlap = overlaps[np.arange(len(crop_indices)), best_local]
+        matched_current = current_indices[best_local]
+        class_novel = best_overlap < float(duplicate_iou)
+        novel[crop_indices] = class_novel
+        minimum_refinement_iou = (
+            float(duplicate_iou)
+            if refinement_iou is None
+            else float(refinement_iou)
+        )
+        refinement[crop_indices] = (
+            (best_overlap >= minimum_refinement_iou)
+            & (
+                crop.scores[crop_indices]
+                >= current.scores[matched_current] * float(refinement_score_ratio)
+            )
+        )
+    return novel, refinement
 
 
 def novel_detection_mask(

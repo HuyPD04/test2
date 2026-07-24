@@ -17,7 +17,10 @@ from anchor_zoom_rl.runtime.data import (
     label_path_for,
     load_yolo_labels,
     read_image,
+    stratified_sequence_sample,
 )
+from anchor_zoom_rl.core.hard_regions import build_hard_regions
+from anchor_zoom_rl.core.reward import covered_ground_truth_mask, match_stats
 from anchor_zoom_rl.runtime.inferencer import AnchorZoomInferencer
 from anchor_zoom_rl.runtime.metrics import AP50Accumulator
 
@@ -52,10 +55,19 @@ def main() -> None:
         )
     )
     inferencer = AnchorZoomInferencer(cfg, checkpoint=checkpoint)
-    images = iter_images(cfg.paths.image_root, args.split, args.limit)
+    all_images = iter_images(cfg.paths.image_root, args.split)
+    images = (
+        all_images
+        if args.limit is None
+        else stratified_sequence_sample(all_images, args.limit, cfg.train.seed)
+    )
     accumulator = AP50Accumulator(cfg.detector.target_classes, cfg.reward.match_iou)
     timings: list[dict[str, float]] = []
     crop_counts: list[int] = []
+    hard_gt = 0
+    hard_true_positives = 0
+    attempted_hard_coverage = 0
+    accepted_hard_coverage = 0
     for index, image_path in enumerate(images, start=1):
         result = inferencer.infer_image(image_path, split=args.split, save=False)
         image_shape = read_image(image_path).shape[:2]
@@ -64,6 +76,34 @@ def main() -> None:
             image_shape,
         ).filter_classes(cfg.detector.target_classes)
         accumulator.update(result.detections, ground_truth)
+        hard_regions = build_hard_regions(
+            result.full_detections,
+            ground_truth,
+            cfg.reward.match_iou,
+            cfg.reward.hard_low_confidence,
+        )
+        stats = match_stats(
+            result.detections,
+            ground_truth,
+            image_shape,
+            cfg.reward.match_iou,
+            cfg.reward.small_area_ratio,
+            hard_regions.hard_mask,
+        )
+        hard_gt += int(hard_regions.hard_mask.sum())
+        hard_true_positives += int(stats.hard_true_positives)
+        attempted_hard_coverage += int(
+            (
+                covered_ground_truth_mask(ground_truth, result.attempted_rois)
+                & hard_regions.hard_mask
+            ).sum()
+        )
+        accepted_hard_coverage += int(
+            (
+                covered_ground_truth_mask(ground_truth, result.accepted_rois)
+                & hard_regions.hard_mask
+            ).sum()
+        )
         timings.append(result.timing)
         crop_counts.append(len(result.attempted_rois))
         print(
@@ -76,6 +116,13 @@ def main() -> None:
         {
             "images": len(images),
             "mean_crops": _mean(crop_counts),
+            "hard_gt": hard_gt,
+            "hard_true_positives": hard_true_positives,
+            "hard_recall": hard_true_positives / max(hard_gt, 1),
+            "attempted_hard_coverage": attempted_hard_coverage
+            / max(hard_gt, 1),
+            "accepted_hard_coverage": accepted_hard_coverage
+            / max(hard_gt, 1),
             "latency_ms_per_image": _mean(
                 [item["method_latency_ms"] for item in timings]
             ),

@@ -16,6 +16,8 @@ class Transition:
     done: bool
     next_mask: np.ndarray
     discount: float = 1.0
+    hard_targets: np.ndarray | None = None
+    hard_target_mask: np.ndarray | None = None
 
 
 class ReplayBuffer:
@@ -83,4 +85,6 @@ class NStepAccumulator:
             done=final.done,
             next_mask=final.next_mask,
             discount=0.0 if final.done else float(self.gamma**steps),
+            hard_targets=first.hard_targets,
+            hard_target_mask=first.hard_target_mask,
         )

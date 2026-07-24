@@ -57,22 +57,29 @@ reward:
   small_area_ratio: 0.0025
   min_crop_detections: 1
   min_utility: 0.15
-  min_reliability: 0.30
+  min_reliability: 0.25
+  refinement_iou: 0.60
+  refinement_score_ratio: 0.90
+  refinement_utility_weight: 0.35
   utility_weight: 0.5
   tp_weight: 2.0
-  hard_tp_weight: 0.75
+  hard_tp_weight: 1.25
   small_tp_weight: 0.5
   fp_weight: 1.25
   crop_cost: 0.50
   overlap_penalty: 0.5
   empty_penalty: 0.8
   rejected_penalty: 0.5
+  hard_coverage_weight: 0.10
+  hard_coverage_max_bonus: 1.0
   stop_bonus: 0.25
   stop_early_penalty: 0.50
-  stop_hard_early_penalty: 0.75
+  stop_hard_base_penalty: 1.0
+  stop_hard_per_gt: 0.15
+  stop_hard_max_penalty: 4.0
 
 train:
-  episodes: 15000
+  episodes: 20000
   batch_size: 256
   replay_size: 50000
   min_replay: 1000
@@ -80,6 +87,8 @@ train:
   n_step: 3
   learning_rate: 0.0001
   hidden_dim: 512
+  hard_aux_loss_weight: 0.20
+  hard_aux_positive_weight_max: 8.0
   epsilon_start: 1.0
   epsilon_end: 0.05
   epsilon_decay_steps: 30000
@@ -89,10 +98,11 @@ train:
   checkpoint_interval: 250
   log_interval: 25
   eval_interval: 1000
-  eval_images: 256
+  eval_images: 512
   eval_ap_weight: 1.0
+  eval_hard_recall_weight: 0.05
   eval_fp_per_image_weight: 0.002
-  eval_crop_weight: 0.02
+  eval_crop_weight: 0.005
   reward_clip: 10.0
   sampling_mode: shuffled_epochs
   seed: 42
