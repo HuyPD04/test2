@@ -126,6 +126,7 @@ class DQNAgent:
         environment_steps: int,
         replay: ReplayBuffer | None = None,
         best_score: float | None = None,
+        training_schema_version: int | None = None,
     ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -140,6 +141,8 @@ class DQNAgent:
             "target": self.target.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
+        if training_schema_version is not None:
+            payload["training_schema_version"] = int(training_schema_version)
         if replay is not None:
             payload["replay"] = replay.state_dict()
         torch.save(payload, path)

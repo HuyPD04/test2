@@ -18,10 +18,20 @@ from tests.test_hard_regions import (
 from tests.test_inference_smoke import test_inference_runs_one_direct_anchor_action
 from tests.test_postprocess_metrics import (
     test_ap50_accumulator_reports_perfect_prediction,
+    test_cross_class_cleanup_suppresses_lower_score_duplicate,
+    test_crop_reliability_penalizes_boundary_noise,
     test_merge_is_class_aware_and_keeps_higher_score_duplicate,
 )
 from tests.test_replay import test_n_step_accumulator_flushes_terminal_suffixes
-from tests.test_reward import test_empty_crop_is_rejected, test_reward_values_new_true_positive_and_crop_cost
+from tests.test_reward import (
+    test_empty_crop_is_rejected,
+    test_low_reliability_crop_is_rejected,
+    test_reward_values_new_true_positive_and_crop_cost,
+)
+from tests.test_sampling import (
+    test_shuffled_epoch_sampler_visits_every_image_once,
+    test_stratified_sample_covers_sequences_before_repeating,
+)
 
 
 def main() -> None:
@@ -34,8 +44,13 @@ def main() -> None:
         test_n_step_accumulator_flushes_terminal_suffixes,
         test_reward_values_new_true_positive_and_crop_cost,
         test_empty_crop_is_rejected,
+        test_low_reliability_crop_is_rejected,
         test_merge_is_class_aware_and_keeps_higher_score_duplicate,
+        test_cross_class_cleanup_suppresses_lower_score_duplicate,
+        test_crop_reliability_penalizes_boundary_noise,
         test_ap50_accumulator_reports_perfect_prediction,
+        test_stratified_sample_covers_sequences_before_repeating,
+        test_shuffled_epoch_sampler_visits_every_image_once,
     ]
     for test in tests:
         test()

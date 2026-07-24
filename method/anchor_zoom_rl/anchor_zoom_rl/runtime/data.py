@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import random
 
 import cv2
 import numpy as np
@@ -19,6 +20,43 @@ def iter_images(image_root: Path, split: str, limit: int | None = None) -> list[
         path for path in split_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
     )
     return images if limit is None else images[: max(int(limit), 0)]
+
+
+def stratified_sequence_sample(
+    images: list[Path],
+    limit: int,
+    seed: int,
+) -> list[Path]:
+    if limit <= 0 or not images:
+        return []
+    if limit >= len(images):
+        return list(images)
+    groups: dict[str, list[Path]] = {}
+    for image in images:
+        sequence = image.stem.split("_", 1)[0]
+        groups.setdefault(sequence, []).append(image)
+    rng = random.Random(int(seed))
+    sequences = sorted(groups)
+    rng.shuffle(sequences)
+    for values in groups.values():
+        rng.shuffle(values)
+    selected: list[Path] = []
+    offsets = {sequence: 0 for sequence in sequences}
+    while len(selected) < limit:
+        added = False
+        for sequence in sequences:
+            offset = offsets[sequence]
+            values = groups[sequence]
+            if offset >= len(values):
+                continue
+            selected.append(values[offset])
+            offsets[sequence] = offset + 1
+            added = True
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+    return selected
 
 
 def read_image(path: Path) -> np.ndarray:

@@ -63,14 +63,26 @@ python scripts/precompute.py --split val
 Train:
 
 ```powershell
-python scripts/train.py --episodes 5000
+python scripts/train.py --episodes 15000 --out-dir runs/rebalanced_v2
 ```
 
 Resume từ `runs/checkpoints/latest.pt`:
 
 ```powershell
-python scripts/train.py --episodes 10000 --resume
+python scripts/train.py --episodes 20000 --out-dir runs/rebalanced_v2 --resume
 ```
+
+Train mặc định dùng `shuffled_epochs`: mọi ảnh được lấy đúng một lần trước khi
+bắt đầu epoch kế tiếp. Với 6.471 ảnh train, 15.000 episode tương đương khoảng
+2,3 epoch. Không resume checkpoint 5.000 episode cũ sau khi đổi reward; hãy
+precompute hard region lại rồi train mới.
+
+Mỗi 1.000 episode, policy được đánh giá trên 256 ảnh val lấy stratified theo
+sequence. `best.pt` được chọn bằng AP50 có phạt FP/ảnh và số crop; toàn bộ lịch
+sử validation được lưu trong `runs/eval.csv`.
+
+Mỗi run phải dùng một `--out-dir` riêng. Fresh train sẽ dừng nếu thư mục đã có
+`train.csv` hoặc `latest.pt`, tránh nối log/checkpoint của hai reward config.
 
 Infer một ảnh hoặc cả split:
 
@@ -138,6 +150,12 @@ Một GT được xem là hard khi full-image detector không match đúng class
 `reward.hard_low_confidence`. Crop chỉ nhận `hard_tp_weight` khi detection sau
 merge thực sự phục hồi hard GT. ROI chỉ chồng lên hard region nhưng không tạo TP
 thì không được thưởng.
+
+Reward n-step đưa vào replay được clip ở `[-10, 10]`. Crop còn phải vượt
+`reward.min_reliability`; reliability kết hợp confidence của detection mới,
+anchor score, boundary ratio và overlap history. Sau class-aware NMS, các box
+khác class gần như trùng nhau được loại bằng `detector.cross_class_iou` và
+`detector.cross_class_ios`.
 
 ## Ghi chú đánh giá
 

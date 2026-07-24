@@ -11,15 +11,25 @@ import torch
 
 from ..config import MethodConfig
 from ..core.anchors import generate_anchors
-from ..core.postprocess import crop_utility, merge_detections
+from ..core.postprocess import crop_reliability, crop_utility, merge_detections
 from ..core.reward import crop_step_outcome, match_stats
 from ..core.state import state_dimension
 from ..core.types import Detections
 from ..rl.agent import DQNAgent
 from ..rl.replay import NStepAccumulator, ReplayBuffer, Transition
-from .data import iter_images, label_path_for, load_yolo_labels, read_image
+from .data import (
+    iter_images,
+    label_path_for,
+    load_yolo_labels,
+    read_image,
+    stratified_sequence_sample,
+)
 from .environment import AnchorZoomEnvironment
+from .metrics import AP50Accumulator
 from .prediction import DetectionRunner
+
+
+TRAINING_SCHEMA_VERSION = 2
 
 
 @dataclass(slots=True)
@@ -34,6 +44,8 @@ class EpisodeSummary:
     loss: float | None
     full_ms: float
     crop_ms: float
+    predictions: Detections
+    ground_truth: Detections
 
 
 class AnchorZoomTrainer:
@@ -51,7 +63,11 @@ class AnchorZoomTrainer:
         self.images = iter_images(cfg.paths.image_root, train_split, limit)
         if not self.images:
             raise ValueError(f"No training images found in split '{train_split}'")
-        self.val_images = iter_images(cfg.paths.image_root, val_split, cfg.train.eval_images)
+        self.val_images = stratified_sequence_sample(
+            iter_images(cfg.paths.image_root, val_split),
+            cfg.train.eval_images,
+            cfg.train.seed,
+        )
         self.runner = runner or DetectionRunner(cfg)
         self.agent = DQNAgent(
             state_dimension(cfg.anchors),
@@ -64,10 +80,21 @@ class AnchorZoomTrainer:
         self.start_episode = 1
         self.best_score = float("-inf")
         self.rng = random.Random(cfg.train.seed)
+        self._sampling_epoch = -1
+        self._sampling_order: list[Path] = []
         self.output_dir = cfg.paths.output_dir
         self.latest_checkpoint = self.output_dir / "checkpoints" / "latest.pt"
         self.log_path = self.output_dir / "train.csv"
+        self.eval_log_path = self.output_dir / "eval.csv"
         _set_seed(cfg.train.seed)
+        if (
+            not cfg.train.resume
+            and (self.log_path.exists() or self.latest_checkpoint.exists())
+        ):
+            raise FileExistsError(
+                f"Fresh training output already exists: {self.output_dir}. "
+                "Use a new --out-dir or pass --resume for the same run."
+            )
         self._prepare_output()
         if cfg.train.resume:
             self._resume()
@@ -76,7 +103,7 @@ class AnchorZoomTrainer:
         total_episodes = int(episodes or self.cfg.train.episodes)
         window: list[EpisodeSummary] = []
         for episode in range(self.start_episode, total_episodes + 1):
-            image_path = self.rng.choice(self.images)
+            image_path = self._training_image(episode)
             epsilon = self.agent.epsilon(self.environment_steps)
             summary = self._run_episode(
                 image_path=image_path,
@@ -99,7 +126,7 @@ class AnchorZoomTrainer:
                 )
 
             if episode % max(self.cfg.train.eval_interval, 1) == 0 and self.val_images:
-                score = self.evaluate()
+                score = self.evaluate(episode)
                 if score > self.best_score:
                     self.best_score = score
                     self.agent.save(
@@ -107,6 +134,7 @@ class AnchorZoomTrainer:
                         episode,
                         self.environment_steps,
                         best_score=self.best_score,
+                        training_schema_version=TRAINING_SCHEMA_VERSION,
                     )
                     print(f"[train] new best validation score={score:.4f}")
 
@@ -117,6 +145,7 @@ class AnchorZoomTrainer:
                     self.environment_steps,
                     replay=self.replay,
                     best_score=self.best_score,
+                    training_schema_version=TRAINING_SCHEMA_VERSION,
                 )
 
         final_episode = max(total_episodes, self.start_episode - 1)
@@ -126,6 +155,7 @@ class AnchorZoomTrainer:
             self.environment_steps,
             replay=self.replay,
             best_score=self.best_score,
+            training_schema_version=TRAINING_SCHEMA_VERSION,
         )
         if not self.cfg.paths.checkpoint.exists():
             self.agent.save(
@@ -133,6 +163,7 @@ class AnchorZoomTrainer:
                 final_episode,
                 self.environment_steps,
                 best_score=self.best_score,
+                training_schema_version=TRAINING_SCHEMA_VERSION,
             )
         elif not self.cfg.train.resume and self.best_score == float("-inf"):
             self.agent.save(
@@ -140,29 +171,60 @@ class AnchorZoomTrainer:
                 final_episode,
                 self.environment_steps,
                 best_score=self.best_score,
+                training_schema_version=TRAINING_SCHEMA_VERSION,
             )
         return self.cfg.paths.checkpoint
 
-    def evaluate(self) -> float:
+    def _training_image(self, episode: int) -> Path:
+        if self.cfg.train.sampling_mode == "random_with_replacement":
+            return self.rng.choice(self.images)
+        if self.cfg.train.sampling_mode != "shuffled_epochs":
+            raise ValueError(
+                "train.sampling_mode must be 'shuffled_epochs' or "
+                "'random_with_replacement'"
+            )
+        epoch = (int(episode) - 1) // len(self.images)
+        offset = (int(episode) - 1) % len(self.images)
+        if epoch != self._sampling_epoch:
+            self._sampling_order = list(self.images)
+            random.Random(self.cfg.train.seed + epoch).shuffle(self._sampling_order)
+            self._sampling_epoch = epoch
+        return self._sampling_order[offset]
+
+    def evaluate(self, episode: int) -> float:
         summaries = [
             self._run_episode(path, self.val_split, epsilon=0.0, learn=False)
             for path in self.val_images
         ]
+        metric = AP50Accumulator(
+            self.cfg.detector.target_classes,
+            self.cfg.reward.match_iou,
+        )
+        for item in summaries:
+            metric.update(item.predictions, item.ground_truth)
+        quality = metric.compute()
+        fp_per_image = quality["false_positives"] / max(len(summaries), 1)
+        mean_crops = float(np.mean([item.crops for item in summaries]))
+        mean_reward = float(np.mean([item.reward for item in summaries]))
         score = float(
-            np.mean(
-                [
-                    item.tp_gain
-                    + item.hard_tp_gain
-                    + 0.5 * item.small_tp_gain
-                    - self.cfg.reward.crop_cost * item.crops
-                    for item in summaries
-                ]
-            )
+            self.cfg.train.eval_ap_weight * quality["ap50"]
+            - self.cfg.train.eval_fp_per_image_weight * fp_per_image
+            - self.cfg.train.eval_crop_weight * mean_crops
+        )
+        self._append_eval_log(
+            episode,
+            score,
+            quality,
+            fp_per_image,
+            mean_crops,
+            mean_reward,
+            len(summaries),
         )
         print(
             f"[eval] images={len(summaries)} score={score:.4f} "
-            f"reward={np.mean([item.reward for item in summaries]):.3f} "
-            f"crops={np.mean([item.crops for item in summaries]):.2f}"
+            f"ap50={quality['ap50']:.4f} precision={quality['precision']:.4f} "
+            f"recall={quality['recall']:.4f} fp/image={fp_per_image:.2f} "
+            f"crops={mean_crops:.2f}"
         )
         return score
 
@@ -198,7 +260,16 @@ class AnchorZoomTrainer:
         environment = AnchorZoomEnvironment(
             anchors, full, image_shape, self.cfg.anchors, self.cfg.environment
         )
-        predictions = full.filter_score(self.cfg.detector.output_confidence)
+        predictions = merge_detections(
+            Detections.empty(),
+            full.filter_score(self.cfg.detector.output_confidence),
+            self.cfg.detector.merge_iou,
+            self.cfg.detector.max_detections,
+            self.cfg.detector.cross_class_iou,
+            self.cfg.detector.cross_class_ios,
+            self.cfg.detector.cross_class_score_ratio,
+            self.cfg.detector.cross_class_groups,
+        )
         initial_stats = match_stats(
             predictions,
             ground_truth,
@@ -261,9 +332,19 @@ class AnchorZoomTrainer:
                 hard_mask,
             )
             utility = crop_utility(crop, predictions, self.cfg.detector.duplicate_iou)
+            anchor_index, _ = environment.decode_action(action)
+            reliability = crop_reliability(
+                crop,
+                predictions,
+                roi,
+                anchor_score=environment.anchors[anchor_index].score,
+                history_overlap=overlap,
+                duplicate_iou=self.cfg.detector.duplicate_iou,
+            )
             eligible = (
                 len(crop) >= self.cfg.reward.min_crop_detections
                 and utility >= self.cfg.reward.min_utility
+                and reliability >= self.cfg.reward.min_reliability
             )
             candidate = (
                 merge_detections(
@@ -271,6 +352,10 @@ class AnchorZoomTrainer:
                     crop,
                     self.cfg.detector.merge_iou,
                     self.cfg.detector.max_detections,
+                    self.cfg.detector.cross_class_iou,
+                    self.cfg.detector.cross_class_ios,
+                    self.cfg.detector.cross_class_score_ratio,
+                    self.cfg.detector.cross_class_groups,
                 )
                 if eligible
                 else predictions
@@ -284,7 +369,13 @@ class AnchorZoomTrainer:
                 hard_mask,
             )
             outcome = crop_step_outcome(
-                before, after, utility, overlap, len(crop), self.cfg.reward
+                before,
+                after,
+                utility,
+                overlap,
+                len(crop),
+                self.cfg.reward,
+                reliability,
             )
             if outcome.accepted:
                 predictions = candidate
@@ -332,6 +423,8 @@ class AnchorZoomTrainer:
             loss=float(np.mean(losses)) if losses else None,
             full_ms=float(full_ms),
             crop_ms=float(crop_ms),
+            predictions=predictions,
+            ground_truth=ground_truth,
         )
 
     def _store_and_optimize(
@@ -341,6 +434,11 @@ class AnchorZoomTrainer:
     ) -> list[float]:
         losses: list[float] = []
         for aggregated in accumulator.append(transition):
+            clip = float(self.cfg.train.reward_clip)
+            if clip > 0:
+                aggregated.reward = float(
+                    np.clip(aggregated.reward, -clip, clip)
+                )
             self.replay.add(aggregated)
             loss = self.agent.optimize(self.replay)
             if loss is not None:
@@ -392,6 +490,14 @@ class AnchorZoomTrainer:
             print(f"[train] resume requested but checkpoint is missing: {self.latest_checkpoint}")
             return
         payload = self.agent.load(self.latest_checkpoint, replay=self.replay)
+        schema_version = int(payload.get("training_schema_version", 1))
+        if schema_version != TRAINING_SCHEMA_VERSION:
+            raise ValueError(
+                "Checkpoint uses an incompatible training reward/evaluation "
+                f"schema ({schema_version} != {TRAINING_SCHEMA_VERSION}). "
+                "Start a fresh run with a new --out-dir; the checkpoint remains "
+                "valid for inference."
+            )
         self.start_episode = int(payload.get("episode", 0)) + 1
         self.environment_steps = int(payload.get("environment_steps", 0))
         self.best_score = float(payload.get("best_score", float("-inf")))
@@ -414,6 +520,12 @@ class AnchorZoomTrainer:
                 "stopped,loss,full_ms,crop_ms\n",
                 encoding="utf-8",
             )
+        if not self.eval_log_path.exists():
+            self.eval_log_path.write_text(
+                "episode,score,ap50,precision,recall,false_positives,"
+                "fp_per_image,mean_crops,mean_reward,images\n",
+                encoding="utf-8",
+            )
 
     def _append_log(
         self,
@@ -430,6 +542,25 @@ class AnchorZoomTrainer:
                 f"{int(summary.stopped)},"
                 f"{'' if summary.loss is None else f'{summary.loss:.6f}'},"
                 f"{summary.full_ms:.3f},{summary.crop_ms:.3f}\n"
+            )
+
+    def _append_eval_log(
+        self,
+        episode: int,
+        score: float,
+        quality: dict,
+        fp_per_image: float,
+        mean_crops: float,
+        mean_reward: float,
+        images: int,
+    ) -> None:
+        with self.eval_log_path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                f"{episode},{score:.6f},{quality['ap50']:.6f},"
+                f"{quality['precision']:.6f},{quality['recall']:.6f},"
+                f"{quality['false_positives']},{fp_per_image:.6f},"
+                f"{mean_crops:.6f},{mean_reward:.6f},"
+                f"{images}\n"
             )
 
 

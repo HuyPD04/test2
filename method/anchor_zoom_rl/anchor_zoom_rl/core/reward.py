@@ -79,10 +79,20 @@ def crop_step_outcome(
     overlap: float,
     num_crop_detections: int,
     cfg: RewardConfig,
+    reliability: float = 1.0,
 ) -> StepOutcome:
-    accepted = num_crop_detections >= cfg.min_crop_detections and utility >= cfg.min_utility
+    accepted = (
+        num_crop_detections >= cfg.min_crop_detections
+        and utility >= cfg.min_utility
+        and reliability >= cfg.min_reliability
+    )
     if not accepted:
-        reason = "empty" if num_crop_detections == 0 else "no_gain"
+        if num_crop_detections == 0:
+            reason = "empty"
+        elif utility < cfg.min_utility:
+            reason = "no_gain"
+        else:
+            reason = "low_reliability"
         penalty = cfg.empty_penalty if num_crop_detections == 0 else cfg.rejected_penalty
         reward = -cfg.crop_cost - penalty - cfg.overlap_penalty * overlap
         return StepOutcome(

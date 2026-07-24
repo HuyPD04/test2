@@ -24,6 +24,20 @@ def iou_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
     return intersection / np.maximum(union, 1e-7)
 
 
+def ios_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
+    """Intersection over the smaller box area."""
+    a = np.asarray(boxes_a, dtype=np.float32).reshape(-1, 4)
+    b = np.asarray(boxes_b, dtype=np.float32).reshape(-1, 4)
+    if len(a) == 0 or len(b) == 0:
+        return np.zeros((len(a), len(b)), dtype=np.float32)
+    top_left = np.maximum(a[:, None, :2], b[None, :, :2])
+    bottom_right = np.minimum(a[:, None, 2:], b[None, :, 2:])
+    wh = np.maximum(bottom_right - top_left, 0.0)
+    intersection = wh[..., 0] * wh[..., 1]
+    smaller = np.minimum(box_area(a)[:, None], box_area(b)[None, :])
+    return intersection / np.maximum(smaller, 1e-7)
+
+
 def clip_box(box: np.ndarray, image_shape: tuple[int, int]) -> np.ndarray:
     height, width = image_shape
     result = np.asarray(box, dtype=np.float32).copy()

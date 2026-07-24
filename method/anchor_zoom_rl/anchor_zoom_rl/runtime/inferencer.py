@@ -9,7 +9,7 @@ import numpy as np
 
 from ..config import MethodConfig
 from ..core.anchors import generate_anchors
-from ..core.postprocess import crop_utility, merge_detections
+from ..core.postprocess import crop_reliability, crop_utility, merge_detections
 from ..core.types import Detections
 from ..rl.agent import DQNAgent
 from .data import read_image
@@ -89,7 +89,16 @@ class AnchorZoomInferencer:
         environment = AnchorZoomEnvironment(
             anchors, full, image.shape[:2], self.cfg.anchors, self.cfg.environment
         )
-        predictions = full.filter_score(self.cfg.detector.output_confidence)
+        predictions = merge_detections(
+            Detections.empty(),
+            full.filter_score(self.cfg.detector.output_confidence),
+            self.cfg.detector.merge_iou,
+            self.cfg.detector.max_detections,
+            self.cfg.detector.cross_class_iou,
+            self.cfg.detector.cross_class_ios,
+            self.cfg.detector.cross_class_score_ratio,
+            self.cfg.detector.cross_class_groups,
+        )
         actions: list[dict[str, Any]] = []
         policy_ms = 0.0
         state_ms = 0.0
@@ -126,9 +135,19 @@ class AnchorZoomInferencer:
             decision_start = time.perf_counter()
             crop = crop.filter_score(self.cfg.detector.output_confidence)
             utility = crop_utility(crop, predictions, self.cfg.detector.duplicate_iou)
+            anchor_index, zoom_index = environment.decode_action(action)
+            reliability = crop_reliability(
+                crop,
+                predictions,
+                roi,
+                anchor_score=environment.anchors[anchor_index].score,
+                history_overlap=overlap,
+                duplicate_iou=self.cfg.detector.duplicate_iou,
+            )
             accepted = (
                 len(crop) >= self.cfg.reward.min_crop_detections
                 and utility >= self.cfg.reward.min_utility
+                and reliability >= self.cfg.reward.min_reliability
             )
             crop_decision_ms += (time.perf_counter() - decision_start) * 1000.0
             if accepted:
@@ -138,10 +157,18 @@ class AnchorZoomInferencer:
                     crop,
                     self.cfg.detector.merge_iou,
                     self.cfg.detector.max_detections,
+                    self.cfg.detector.cross_class_iou,
+                    self.cfg.detector.cross_class_ios,
+                    self.cfg.detector.cross_class_score_ratio,
+                    self.cfg.detector.cross_class_groups,
                 )
                 merge_ms += (time.perf_counter() - merge_start) * 1000.0
-            anchor_index, zoom_index = environment.decode_action(action)
-            environment.record(action, roi, accepted, utility)
+            environment.record(
+                action,
+                roi,
+                accepted,
+                utility if accepted else 0.0,
+            )
             actions.append(
                 {
                     "action": int(action),
@@ -153,6 +180,7 @@ class AnchorZoomInferencer:
                     "overlap": float(overlap),
                     "crop_detections": len(crop),
                     "utility": float(utility),
+                    "reliability": float(reliability),
                     "accepted": bool(accepted),
                     "cache_hit": bool(cache_hit),
                 }

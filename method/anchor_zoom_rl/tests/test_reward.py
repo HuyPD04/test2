@@ -46,3 +46,26 @@ def test_empty_crop_is_rejected() -> None:
     assert not outcome.accepted
     assert outcome.reason == "empty"
     assert outcome.reward == -1.0
+
+
+def test_low_reliability_crop_is_rejected() -> None:
+    cfg = RewardConfig(
+        crop_cost=0.3,
+        rejected_penalty=0.5,
+        overlap_penalty=0.0,
+        min_reliability=0.35,
+    )
+    empty_stats = match_stats(
+        Detections.empty(), Detections.empty(), (100, 100), 0.5, 0.001
+    )
+    outcome = crop_step_outcome(
+        empty_stats,
+        empty_stats,
+        utility=0.8,
+        overlap=0.0,
+        num_crop_detections=3,
+        cfg=cfg,
+        reliability=0.2,
+    )
+    assert not outcome.accepted
+    assert outcome.reason == "low_reliability"

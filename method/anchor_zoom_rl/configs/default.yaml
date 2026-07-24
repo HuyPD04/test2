@@ -16,6 +16,13 @@ detector:
   yolo_iou: 0.7
   merge_iou: 0.6
   duplicate_iou: 0.5
+  cross_class_iou: 0.85
+  cross_class_ios: null
+  cross_class_score_ratio: 0.90
+  cross_class_groups:
+    - [0, 1]
+    - [3, 4, 5, 8]
+    - [2, 6, 7, 9]
   max_detections: 3000
   target_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   device: cuda
@@ -46,25 +53,26 @@ environment:
 
 reward:
   match_iou: 0.5
-  hard_low_confidence: 0.25
+  hard_low_confidence: 0.10
   small_area_ratio: 0.0025
   min_crop_detections: 1
   min_utility: 0.15
+  min_reliability: 0.30
   utility_weight: 0.5
   tp_weight: 2.0
-  hard_tp_weight: 1.5
+  hard_tp_weight: 0.75
   small_tp_weight: 0.5
-  fp_weight: 0.75
-  crop_cost: 0.35
+  fp_weight: 1.25
+  crop_cost: 0.50
   overlap_penalty: 0.5
   empty_penalty: 0.8
   rejected_penalty: 0.5
   stop_bonus: 0.25
-  stop_early_penalty: 1.0
-  stop_hard_early_penalty: 1.5
+  stop_early_penalty: 0.50
+  stop_hard_early_penalty: 0.75
 
 train:
-  episodes: 5000
+  episodes: 15000
   batch_size: 256
   replay_size: 50000
   min_replay: 1000
@@ -74,14 +82,19 @@ train:
   hidden_dim: 512
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay_steps: 15000
+  epsilon_decay_steps: 30000
   target_update_interval: 250
   soft_update_tau: 0.005
   gradient_clip: 10.0
   checkpoint_interval: 250
   log_interval: 25
-  eval_interval: 500
-  eval_images: 32
+  eval_interval: 1000
+  eval_images: 256
+  eval_ap_weight: 1.0
+  eval_fp_per_image_weight: 0.002
+  eval_crop_weight: 0.02
+  reward_clip: 10.0
+  sampling_mode: shuffled_epochs
   seed: 42
   resume: false
   cache_full_detections: true

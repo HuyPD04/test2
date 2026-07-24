@@ -28,6 +28,14 @@ class DetectorConfig:
     yolo_iou: float = 0.7
     merge_iou: float = 0.6
     duplicate_iou: float = 0.5
+    cross_class_iou: float = 0.85
+    cross_class_ios: float | None = None
+    cross_class_score_ratio: float = 0.90
+    cross_class_groups: tuple[tuple[int, ...], ...] = (
+        (0, 1),
+        (3, 4, 5, 8),
+        (2, 6, 7, 9),
+    )
     max_detections: int = 3000
     target_classes: tuple[int, ...] = tuple(range(10))
     device: str = "cuda"
@@ -64,27 +72,28 @@ class EnvironmentConfig:
 @dataclass(slots=True)
 class RewardConfig:
     match_iou: float = 0.5
-    hard_low_confidence: float = 0.25
+    hard_low_confidence: float = 0.10
     small_area_ratio: float = 0.0025
     min_crop_detections: int = 1
     min_utility: float = 0.15
+    min_reliability: float = 0.30
     utility_weight: float = 0.5
     tp_weight: float = 2.0
-    hard_tp_weight: float = 1.5
+    hard_tp_weight: float = 0.75
     small_tp_weight: float = 0.5
-    fp_weight: float = 0.75
-    crop_cost: float = 0.35
+    fp_weight: float = 1.25
+    crop_cost: float = 0.50
     overlap_penalty: float = 0.5
     empty_penalty: float = 0.8
     rejected_penalty: float = 0.5
     stop_bonus: float = 0.25
-    stop_early_penalty: float = 1.0
-    stop_hard_early_penalty: float = 1.5
+    stop_early_penalty: float = 0.50
+    stop_hard_early_penalty: float = 0.75
 
 
 @dataclass(slots=True)
 class TrainConfig:
-    episodes: int = 5000
+    episodes: int = 15000
     batch_size: int = 256
     replay_size: int = 50000
     min_replay: int = 1000
@@ -94,14 +103,19 @@ class TrainConfig:
     hidden_dim: int = 512
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
-    epsilon_decay_steps: int = 15000
+    epsilon_decay_steps: int = 30000
     target_update_interval: int = 250
     soft_update_tau: float = 0.005
     gradient_clip: float = 10.0
     checkpoint_interval: int = 250
     log_interval: int = 25
-    eval_interval: int = 500
-    eval_images: int = 32
+    eval_interval: int = 1000
+    eval_images: int = 256
+    eval_ap_weight: float = 1.0
+    eval_fp_per_image_weight: float = 0.002
+    eval_crop_weight: float = 0.02
+    reward_clip: float = 10.0
+    sampling_mode: str = "shuffled_epochs"
     seed: int = 42
     resume: bool = False
     cache_full_detections: bool = True
@@ -182,6 +196,14 @@ def load_config(path: str | Path) -> MethodConfig:
     detector_raw = _section(raw, "detector")
     if "target_classes" in detector_raw:
         detector_raw = {**detector_raw, "target_classes": tuple(detector_raw["target_classes"])}
+    if "cross_class_groups" in detector_raw:
+        detector_raw = {
+            **detector_raw,
+            "cross_class_groups": tuple(
+                tuple(int(value) for value in group)
+                for group in detector_raw["cross_class_groups"]
+            ),
+        }
     anchor_raw = _section(raw, "anchors")
     if "zoom_bins" in anchor_raw:
         anchor_raw = {**anchor_raw, "zoom_bins": tuple(anchor_raw["zoom_bins"])}
@@ -198,4 +220,12 @@ def load_config(path: str | Path) -> MethodConfig:
         raise ValueError("anchors.top_k and anchors.zoom_bins must define a non-empty action space")
     if cfg.environment.max_crops <= 0:
         raise ValueError("environment.max_crops must be positive")
+    if cfg.train.sampling_mode not in {
+        "shuffled_epochs",
+        "random_with_replacement",
+    }:
+        raise ValueError(
+            "train.sampling_mode must be 'shuffled_epochs' or "
+            "'random_with_replacement'"
+        )
     return cfg
