@@ -21,9 +21,9 @@ infer:
   save_predictions: true
   save_metadata: true
   save_visualization: false
-  batched_inference: true
+  batched_inference: false
   use_wbf: false
-  nms_type: "source_aware_cdn"
+  nms_type: "cdn"
   device: "cuda"
   policy_device: "cuda"
   feature_layers:

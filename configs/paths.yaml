@@ -8,4 +8,4 @@ paths:
   cache_root: data/cache
   dqn_out_dir: runs/dqn
   infer_out_dir: runs/infer
-  checkpoint: runs/dqn/best.pt
+  checkpoint: runs\dqn\best.pt

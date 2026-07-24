@@ -91,6 +91,63 @@ def filter_boundary_boxes(
     return boxes[keep], scores[keep], classes[keep]
 
 
+def _roi_info_signal(info: dict) -> float:
+    if not info:
+        return 0.0
+    signals: list[float] = []
+    if "roi_prefilter_score" in info and info["roi_prefilter_score"] is not None:
+        raw = max(float(info["roi_prefilter_score"]), 0.0)
+        signals.append(raw / (raw + 500.0))
+    for key in ("observable_score", "total_target_score", "target_score"):
+        if key in info and info[key] is not None:
+            signals.append(float(np.clip(float(info[key]) / 4.0, 0.0, 1.0)))
+    return float(max(signals, default=0.0))
+
+
+def _crop_box_reliability(
+    boxes: np.ndarray,
+    roi: np.ndarray,
+    image_shape: tuple[int, int],
+    info: dict,
+    margin: float = 6.0,
+) -> np.ndarray:
+    boxes = np.asarray(boxes, dtype=np.float32).reshape(-1, 4)
+    if len(boxes) == 0:
+        return np.zeros((0,), dtype=np.float32)
+
+    img_h, img_w = image_shape
+    roi = np.asarray(roi, dtype=np.float32).reshape(4)
+    image_area = max(float(img_h * img_w), 1.0)
+    roi_area = float(area(roi.reshape(1, 4))[0])
+    roi_area_ratio = float(np.clip(roi_area / image_area, 0.0, 1.0))
+    scale_signal = float(np.clip((0.5 - roi_area_ratio) / 0.5, 0.0, 1.0))
+    info_signal = _roi_info_signal(info)
+    base = float(np.clip(0.25 + 0.35 * scale_signal + 0.40 * info_signal, 0.0, 1.0))
+
+    x1, y1, x2, y2 = roi
+    touches_internal_boundary = (
+        ((np.abs(boxes[:, 0] - x1) <= margin) & (x1 > 0.0))
+        | ((np.abs(boxes[:, 1] - y1) <= margin) & (y1 > 0.0))
+        | ((np.abs(boxes[:, 2] - x2) <= margin) & (x2 < float(img_w)))
+        | ((np.abs(boxes[:, 3] - y2) <= margin) & (y2 < float(img_h)))
+    )
+    boundary_factor = np.where(touches_internal_boundary, 0.25, 1.0).astype(np.float32)
+    return np.clip(base * boundary_factor, 0.0, 1.0).astype(np.float32)
+
+
+def _previous_reliability_parts(
+    full_boxes: np.ndarray,
+    slice_reliability_parts: list[np.ndarray] | None,
+    include: bool,
+) -> list[np.ndarray] | None:
+    if not include:
+        return None
+    return [
+        np.zeros((len(full_boxes),), dtype=np.float32),
+        *(slice_reliability_parts or []),
+    ]
+
+
 def _merged_source_counts(
     full_boxes: np.ndarray,
     full_scores: np.ndarray,
@@ -138,7 +195,10 @@ def _new_detection_gain(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    slice_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> int:
+    reliability_enabled = slice_reliability_parts is not None or candidate_reliability is not None
     return new_detection_gain_after_merge(
         image_shape,
         merge_iou,
@@ -153,6 +213,12 @@ def _new_detection_gain(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            reliability_enabled,
+        ),
+        candidate_reliability=candidate_reliability,
     )
 
 
@@ -173,7 +239,10 @@ def _new_detection_utility(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    slice_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> float:
+    reliability_enabled = slice_reliability_parts is not None or candidate_reliability is not None
     return new_detection_utility_after_merge(
         image_shape,
         merge_iou,
@@ -188,6 +257,12 @@ def _new_detection_utility(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            reliability_enabled,
+        ),
+        candidate_reliability=candidate_reliability,
     )
 
 
@@ -208,7 +283,10 @@ def _new_detection_stats(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    slice_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> tuple[int, float, float]:
+    reliability_enabled = slice_reliability_parts is not None or candidate_reliability is not None
     return new_detection_stats_after_merge(
         image_shape,
         merge_iou,
@@ -223,6 +301,12 @@ def _new_detection_stats(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            reliability_enabled,
+        ),
+        candidate_reliability=candidate_reliability,
     )
 
 
@@ -555,6 +639,7 @@ def _infer_with_loaded(
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
     slice_classes_all: list[np.ndarray] = []
+    slice_reliability_all: list[np.ndarray] = []
     slice_meta: list[dict] = []
 
     if full_yolo is not yolo:
@@ -722,6 +807,7 @@ def _infer_with_loaded(
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
                 boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
+                reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes, full_scores, full_classes,
                     slice_boxes_all, slice_scores_all, slice_classes_all,
@@ -733,6 +819,8 @@ def _infer_with_loaded(
                     cfg.cross_class_duplicate_ios,
                     use_wbf=cfg.use_wbf,
                     nms_type=cfg.nms_type,
+                    slice_reliability_parts=slice_reliability_all,
+                    candidate_reliability=reliability_i,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -746,6 +834,7 @@ def _infer_with_loaded(
                     slice_boxes_all.append(boxes_i)
                     slice_scores_all.append(scores_i)
                     slice_classes_all.append(classes_i)
+                    slice_reliability_all.append(reliability_i)
                 else:
                     rejected_rois.append(roi)
                 slice_meta.append(
@@ -764,6 +853,7 @@ def _infer_with_loaded(
                         "new_detections_after_nms": int(new_detection_gain),
                         "new_detection_utility": float(new_detection_utility),
                         "new_detection_max_score": float(new_detection_max_score),
+                        "box_reliability_mean": float(reliability_i.mean()) if len(reliability_i) else 0.0,
                         "crop_batch_size": len(candidate_rois),
                         "batched": True,
                         "roi_prefilter_score": info.get("roi_prefilter_score"),
@@ -875,6 +965,7 @@ def _infer_with_loaded(
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
                 boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
+                reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes,
                     full_scores,
@@ -892,6 +983,8 @@ def _infer_with_loaded(
                     cfg.cross_class_duplicate_ios,
                     use_wbf=cfg.use_wbf,
                     nms_type=cfg.nms_type,
+                    slice_reliability_parts=slice_reliability_all,
+                    candidate_reliability=reliability_i,
                 )
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
@@ -906,6 +999,7 @@ def _infer_with_loaded(
                     slice_boxes_all.append(boxes_i)
                     slice_scores_all.append(scores_i)
                     slice_classes_all.append(classes_i)
+                    slice_reliability_all.append(reliability_i)
                 else:
                     consecutive_rejections += 1
                     rejected_rois.append(roi)
@@ -925,6 +1019,7 @@ def _infer_with_loaded(
                         "new_detections_after_nms": int(new_detection_gain),
                         "new_detection_utility": float(new_detection_utility),
                         "new_detection_max_score": float(new_detection_max_score),
+                        "box_reliability_mean": float(reliability_i.mean()) if len(reliability_i) else 0.0,
                         "crop_batch_size": len(pending),
                     }
                 )
@@ -940,6 +1035,10 @@ def _infer_with_loaded(
         np.full((len(boxes_i),), index + 1, dtype=np.int32)
         for index, boxes_i in enumerate(slice_boxes_all)
     ]
+    reliability_parts = [
+        np.zeros((len(full_boxes),), dtype=np.float32),
+        *slice_reliability_all,
+    ]
 
     boxes, scores, classes, sources = merge_predictions_with_sources(
         det.image_shape,
@@ -952,6 +1051,7 @@ def _infer_with_loaded(
         cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
         use_wbf=cfg.use_wbf,
         nms_type=cfg.nms_type,
+        reliability_parts=reliability_parts,
     )
     timing["merge_ms"] = (time.perf_counter() - merge_start) * 1000.0
 

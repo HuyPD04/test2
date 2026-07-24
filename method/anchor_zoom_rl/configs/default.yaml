@@ -1,0 +1,96 @@
+paths:
+  weights: ../../../yolo11s.pt
+  crop_weights: ../../../yolo11s.pt
+  image_root: ../../../data/raw/images
+  label_root: ../../../data/raw/labels
+  cache_dir: ../../../data/cache_1
+  output_dir: ../runs
+  checkpoint: ../runs/checkpoints/best.pt
+
+detector:
+  full_imgsz: 960
+  crop_imgsz: 512
+  full_confidence: 0.01
+  crop_confidence: 0.05
+  output_confidence: 0.25
+  yolo_iou: 0.7
+  merge_iou: 0.6
+  duplicate_iou: 0.5
+  max_detections: 3000
+  target_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  device: cuda
+
+anchors:
+  top_k: 12
+  zoom_bins: [1.0, 1.25, 1.5, 2.0]
+  cluster_grid_size: 6
+  min_confidence: 0.01
+  low_confidence: 0.35
+  small_area_ratio: 0.0025
+  density_norm: 8.0
+  full_count_norm: 100.0
+  uncertainty_weight: 0.45
+  density_weight: 0.35
+  small_object_weight: 0.20
+  base_slice_fraction: 0.35
+  min_slice_fraction: 0.12
+  max_slice_fraction: 0.42
+  context_factor: 1.6
+  add_fallback_grid: true
+  fallback_grid_size: 3
+  fallback_score: 0.03
+
+environment:
+  max_crops: 4
+  action_overlap_threshold: 0.75
+
+reward:
+  match_iou: 0.5
+  hard_low_confidence: 0.25
+  small_area_ratio: 0.0025
+  min_crop_detections: 1
+  min_utility: 0.15
+  utility_weight: 0.5
+  tp_weight: 2.0
+  hard_tp_weight: 1.5
+  small_tp_weight: 0.5
+  fp_weight: 0.75
+  crop_cost: 0.35
+  overlap_penalty: 0.5
+  empty_penalty: 0.8
+  rejected_penalty: 0.5
+  stop_bonus: 0.25
+  stop_early_penalty: 1.0
+  stop_hard_early_penalty: 1.5
+
+train:
+  episodes: 5000
+  batch_size: 256
+  replay_size: 50000
+  min_replay: 1000
+  gamma: 0.95
+  n_step: 3
+  learning_rate: 0.0001
+  hidden_dim: 512
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 15000
+  target_update_interval: 250
+  soft_update_tau: 0.005
+  gradient_clip: 10.0
+  checkpoint_interval: 250
+  log_interval: 25
+  eval_interval: 500
+  eval_images: 32
+  seed: 42
+  resume: false
+  cache_full_detections: true
+  cache_hard_regions: true
+  cache_crop_detections: true
+
+inference:
+  save_predictions: true
+  save_metadata: true
+  save_visualization: false
+  cache_full_detections: false
+  cache_crop_detections: false

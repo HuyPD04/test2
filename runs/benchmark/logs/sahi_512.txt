@@ -1,0 +1,24 @@
+Tổng số ảnh     : 1610
+Tổng thời gian  : 652.32 giây
+Trung bình 1 ảnh: 0.4052 giây/ảnh
+Tốc độ khung hình: 2.47 FPS
+
+test:
+Average Precision by IoU threshold (diagnostic, maxDets=500):
+  AP@0.50 = 44.32%.
+  AP@0.55 = 41.88%.
+  AP@0.60 = 38.92%.
+  AP@0.65 = 35.22%.
+  AP@0.70 = 31.1%.
+  AP@0.75 = 25.81%.
+  AP@0.80 = 19.47%.
+  AP@0.85 = 12.21%.
+  AP@0.90 = 4.77%.
+  AP@0.95 = 0.46%.
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 25.42%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 44.32%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 25.81%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.08%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 12.72%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 33.69%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 34.61%.

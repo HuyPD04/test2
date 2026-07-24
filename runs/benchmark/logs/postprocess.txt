@@ -1,0 +1,39 @@
+reliability_aware_cdn:
+Average Precision by IoU threshold (diagnostic, maxDets=500):
+  AP@0.50 = 47.41%.
+  AP@0.55 = 45.21%.
+  AP@0.60 = 42.39%.
+  AP@0.65 = 38.88%.
+  AP@0.70 = 34.42%.
+  AP@0.75 = 29.11%.
+  AP@0.80 = 22.76%.
+  AP@0.85 = 15.38%.
+  AP@0.90 = 6.95%.
+  AP@0.95 = 0.91%.
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 28.34%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 47.41%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 29.11%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.21%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 13.27%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 35.92%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 38.41%.
+
+cdn:
+Average Precision by IoU threshold (diagnostic, maxDets=500):
+  AP@0.50 = 47.41%.
+  AP@0.55 = 45.2%.
+  AP@0.60 = 42.38%.
+  AP@0.65 = 38.86%.
+  AP@0.70 = 34.4%.
+  AP@0.75 = 29.11%.
+  AP@0.80 = 22.73%.
+  AP@0.85 = 15.35%.
+  AP@0.90 = 6.94%.
+  AP@0.95 = 0.91%.
+Average Precision  (AP) @[ IoU=0.50:0.95 | maxDets=500 ] = 28.33%.
+Average Precision  (AP) @[ IoU=0.50      | maxDets=500 ] = 47.41%.
+Average Precision  (AP) @[ IoU=0.75      | maxDets=500 ] = 29.11%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=  1 ] = 2.21%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets= 10 ] = 13.28%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=100 ] = 35.9%.
+Average Recall     (AR) @[ IoU=0.50:0.95 | maxDets=500 ] = 38.38%.

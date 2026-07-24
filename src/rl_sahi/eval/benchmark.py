@@ -40,6 +40,7 @@ from rl_sahi.inference.merge import (
 from rl_sahi.inference.pipeline import (
     _crop_rejection_reason,
     _attempt_overlap,
+    _crop_box_reliability,
     _filter_classes,
     _new_detection_stats,
     _skip_crop_reason,
@@ -317,6 +318,7 @@ def _merge_predictions(
     nms_type: str = "standard",
     cross_class_duplicate_iou: float | None = 0.85,
     cross_class_duplicate_ios: float | None = 0.95,
+    reliability_parts: list[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     sources_parts = [
         np.full((len(boxes),), 0 if index == 0 else index, dtype=np.int32)
@@ -333,6 +335,7 @@ def _merge_predictions(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        reliability_parts=reliability_parts,
     )
     return boxes, scores, classes
 
@@ -723,6 +726,7 @@ def _predict_rl_sahi(
     slice_boxes_all: list[np.ndarray] = []
     slice_scores_all: list[np.ndarray] = []
     slice_classes_all: list[np.ndarray] = []
+    slice_reliability_all: list[np.ndarray] = []
     accepted_rois: list[np.ndarray] = []
     attempted_rois: list[np.ndarray] = []
     crop_inference_count = 0
@@ -730,6 +734,7 @@ def _predict_rl_sahi(
 
     if cfg.batched_inference:
         candidate_rois: list[np.ndarray] = []
+        candidate_infos: list[dict] = []
         attempt_idx = 1
         while attempt_idx <= max_attempts and len(candidate_rois) < env_cfg.max_slices:
             history_arr = (
@@ -756,6 +761,7 @@ def _predict_rl_sahi(
                     break
             else:
                 candidate_rois.append(roi)
+                candidate_infos.append(info)
             attempt_idx += 1
 
         if candidate_rois:
@@ -769,6 +775,10 @@ def _predict_rl_sahi(
                 )
                 selected = select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk)
                 candidate_rois = [candidate_rois[index] for index in selected]
+                candidate_infos = [
+                    {**candidate_infos[index], "roi_prefilter_score": float(candidate_scores[index])}
+                    for index in selected
+                ]
             predictions = run_yolo_on_crops(
                 crop_model,
                 [image_path] * len(candidate_rois),
@@ -780,7 +790,7 @@ def _predict_rl_sahi(
                 device=cfg.device,
             )
             crop_inference_count = len(candidate_rois)
-            for roi, (boxes_i, scores_i, classes_i) in zip(candidate_rois, predictions):
+            for roi, info, (boxes_i, scores_i, classes_i) in zip(candidate_rois, candidate_infos, predictions):
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(
                     boxes_i,
@@ -791,6 +801,7 @@ def _predict_rl_sahi(
                 boxes_i, scores_i, classes_i = filter_boundary_boxes(
                     boxes_i, scores_i, classes_i, roi, det.image_shape
                 )
+                reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = (
                     _new_detection_stats(
                         full_boxes,
@@ -809,6 +820,8 @@ def _predict_rl_sahi(
                         cfg.cross_class_duplicate_ios,
                         use_wbf=cfg.use_wbf,
                         nms_type=cfg.nms_type,
+                        slice_reliability_parts=slice_reliability_all,
+                        candidate_reliability=reliability_i,
                     )
                 )
                 if _crop_rejection_reason(
@@ -823,6 +836,7 @@ def _predict_rl_sahi(
                 slice_boxes_all.append(boxes_i)
                 slice_scores_all.append(scores_i)
                 slice_classes_all.append(classes_i)
+                slice_reliability_all.append(reliability_i)
 
         boxes, scores, classes = _merge_predictions(
             det.image_shape,
@@ -834,6 +848,10 @@ def _predict_rl_sahi(
             nms_type=cfg.nms_type,
             cross_class_duplicate_iou=cfg.cross_class_duplicate_iou,
             cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
+            reliability_parts=[
+                np.zeros((len(full_boxes),), dtype=np.float32),
+                *slice_reliability_all,
+            ],
         )
         return boxes, scores, classes, len(accepted_rois), crop_inference_count
 
@@ -902,12 +920,13 @@ def _predict_rl_sahi(
             device=cfg.device,
         )
         crop_inference_count += len(pending)
-        for (roi, _info), (boxes_i, scores_i, classes_i) in zip(pending, predictions):
+        for (roi, info), (boxes_i, scores_i, classes_i) in zip(pending, predictions):
             classes_i = cfg.class_mapping.map_model_classes(classes_i)
             boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
             boxes_i, scores_i, classes_i = filter_boundary_boxes(
                 boxes_i, scores_i, classes_i, roi, det.image_shape
             )
+            reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
             new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                 full_boxes,
                 full_scores,
@@ -925,6 +944,8 @@ def _predict_rl_sahi(
                 cfg.cross_class_duplicate_ios,
                 use_wbf=cfg.use_wbf,
                 nms_type=cfg.nms_type,
+                slice_reliability_parts=slice_reliability_all,
+                candidate_reliability=reliability_i,
             )
             if _crop_rejection_reason(
                 len(boxes_i),
@@ -940,6 +961,7 @@ def _predict_rl_sahi(
             slice_boxes_all.append(boxes_i)
             slice_scores_all.append(scores_i)
             slice_classes_all.append(classes_i)
+            slice_reliability_all.append(reliability_i)
         if rejection_limit > 0 and consecutive_rejections >= rejection_limit:
             stop_attempts = True
 
@@ -953,6 +975,10 @@ def _predict_rl_sahi(
         nms_type=cfg.nms_type,
         cross_class_duplicate_iou=cfg.cross_class_duplicate_iou,
         cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
+        reliability_parts=[
+            np.zeros((len(full_boxes),), dtype=np.float32),
+            *slice_reliability_all,
+        ],
     )
     return boxes, scores, classes, len(accepted_rois), crop_inference_count
 

@@ -216,6 +216,76 @@ class MergeGainTest(unittest.TestCase):
         self.assertEqual(int(classes[0]), 0)
         self.assertEqual(int(sources[0]), 1)
 
+    def test_reliability_aware_nms_keeps_full_when_slice_is_unreliable(self) -> None:
+        full_box = np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32)
+        slice_box = np.array([[10.5, 10.5, 30.5, 30.5]], dtype=np.float32)
+
+        boxes, scores, classes, sources = merge_predictions_with_sources(
+            image_shape=(100, 100),
+            merge_iou=0.7,
+            boxes_parts=[full_box, slice_box],
+            scores_parts=[
+                np.array([0.90], dtype=np.float32),
+                np.array([0.86], dtype=np.float32),
+            ],
+            classes_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([0.0], dtype=np.float32),
+            ],
+            sources_parts=[
+                np.array([0], dtype=np.int32),
+                np.array([1], dtype=np.int32),
+            ],
+            reliability_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([0.0], dtype=np.float32),
+            ],
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            nms_type="reliability_aware_cdn",
+        )
+
+        self.assertEqual(len(boxes), 1)
+        np.testing.assert_allclose(boxes[0], full_box[0], rtol=1e-6, atol=1e-6)
+        self.assertAlmostEqual(float(scores[0]), 0.90, places=6)
+        self.assertEqual(int(classes[0]), 0)
+        self.assertEqual(int(sources[0]), 0)
+
+    def test_reliability_aware_nms_prefers_reliable_slice_when_scores_are_close(self) -> None:
+        full_box = np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32)
+        slice_box = np.array([[10.5, 10.5, 30.5, 30.5]], dtype=np.float32)
+
+        boxes, scores, classes, sources = merge_predictions_with_sources(
+            image_shape=(100, 100),
+            merge_iou=0.7,
+            boxes_parts=[full_box, slice_box],
+            scores_parts=[
+                np.array([0.90], dtype=np.float32),
+                np.array([0.86], dtype=np.float32),
+            ],
+            classes_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([0.0], dtype=np.float32),
+            ],
+            sources_parts=[
+                np.array([0], dtype=np.int32),
+                np.array([1], dtype=np.int32),
+            ],
+            reliability_parts=[
+                np.array([0.0], dtype=np.float32),
+                np.array([1.0], dtype=np.float32),
+            ],
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            nms_type="reliability_aware_cdn",
+        )
+
+        self.assertEqual(len(boxes), 1)
+        np.testing.assert_allclose(boxes[0], slice_box[0], rtol=1e-6, atol=1e-6)
+        self.assertAlmostEqual(float(scores[0]), 0.86, places=6)
+        self.assertEqual(int(classes[0]), 0)
+        self.assertEqual(int(sources[0]), 1)
+
     def test_merge_with_sources_uses_wbf_source_assignment(self) -> None:
         full_box = np.array([[0.0, 0.0, 10.0, 10.0]], dtype=np.float32)
         slice_box = np.array([[1.0, 1.0, 11.0, 11.0]], dtype=np.float32)

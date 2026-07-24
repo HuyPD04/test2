@@ -35,5 +35,5 @@ class InferenceConfig:
     save_visualization: bool = False
     batched_inference: bool = False
     use_wbf: bool = False
-    nms_type: str = "standard"  # standard | diou | cdn | source_aware_<type>
+    nms_type: str = "standard"  # standard | diou | cdn | source_aware_<type> | reliability_aware_<type>
     class_mapping: ClassMapping = field(default_factory=ClassMapping)

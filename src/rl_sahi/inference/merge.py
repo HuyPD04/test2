@@ -13,6 +13,7 @@ DEFAULT_CROSS_CLASS_DUPLICATE_GROUPS = (DEFAULT_VEHICLE_DUPLICATE_CLASSES,)
 DEFAULT_CROSS_CLASS_DUPLICATE_IOU = 0.85
 DEFAULT_CROSS_CLASS_DUPLICATE_IOS = 0.95
 DEFAULT_SOURCE_AWARE_SLICE_BONUS = 0.05
+DEFAULT_RELIABILITY_AWARE_BONUS = 0.05
 
 
 def save_prediction_txt(
@@ -29,15 +30,23 @@ def save_prediction_txt(
             f.write(f"{int(cls)} {float(score):.6f} {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {int(source)}\n")
 
 
-def _split_nms_type(nms_type: str) -> tuple[bool, str]:
+def _split_nms_type(nms_type: str) -> tuple[str, str]:
     name = str(nms_type).lower().replace("-", "_")
     if name in {"source_aware", "sourceaware"}:
-        return True, "standard"
+        return "source", "standard"
     if name.startswith("source_aware_"):
-        return True, name.removeprefix("source_aware_") or "standard"
+        return "source", name.removeprefix("source_aware_") or "standard"
     if name.endswith("_source_aware"):
-        return True, name.removesuffix("_source_aware") or "standard"
-    return False, name
+        return "source", name.removesuffix("_source_aware") or "standard"
+    if name in {"reliability_aware", "reliabilityaware", "ra"}:
+        return "reliability", "standard"
+    if name.startswith("reliability_aware_"):
+        return "reliability", name.removeprefix("reliability_aware_") or "standard"
+    if name.endswith("_reliability_aware"):
+        return "reliability", name.removesuffix("_reliability_aware") or "standard"
+    if name.startswith("ra_"):
+        return "reliability", name.removeprefix("ra_") or "standard"
+    return "none", name
 
 
 def _source_priority_scores(
@@ -50,6 +59,40 @@ def _source_priority_scores(
     return scores + (sources > 0).astype(np.float32) * float(slice_bonus)
 
 
+def _reliability_priority_scores(
+    scores: np.ndarray,
+    reliabilities: np.ndarray | None,
+    bonus: float = DEFAULT_RELIABILITY_AWARE_BONUS,
+) -> np.ndarray:
+    scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+    if reliabilities is None:
+        return scores
+    reliabilities = np.asarray(reliabilities, dtype=np.float32).reshape(-1)
+    if len(reliabilities) != len(scores):
+        raise ValueError("scores and reliabilities must have the same length")
+    reliabilities = np.clip(reliabilities, 0.0, 1.0)
+    return scores + reliabilities * float(bonus)
+
+
+def _reliabilities_from_parts(
+    reliability_parts: list[np.ndarray] | None,
+    expected_len: int,
+) -> np.ndarray | None:
+    if reliability_parts is None:
+        return None
+    if not reliability_parts:
+        return np.zeros((expected_len,), dtype=np.float32)
+    if not any(len(part) > 0 for part in reliability_parts):
+        return np.zeros((expected_len,), dtype=np.float32)
+    reliabilities = np.concatenate(
+        [np.asarray(part, dtype=np.float32).reshape(-1) for part in reliability_parts],
+        axis=0,
+    )
+    if len(reliabilities) != expected_len:
+        raise ValueError("reliability_parts must match the number of boxes")
+    return reliabilities
+
+
 def class_aware_nms(
     boxes: np.ndarray,
     scores: np.ndarray,
@@ -59,7 +102,7 @@ def class_aware_nms(
 ) -> np.ndarray:
     if len(boxes) == 0:
         return np.zeros((0,), dtype=np.int64)
-    _source_aware, base_nms_type = _split_nms_type(nms_type)
+    _priority_mode, base_nms_type = _split_nms_type(nms_type)
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
         idx = np.flatnonzero(classes.astype(np.int64) == cls)
@@ -76,24 +119,35 @@ def class_aware_nms_with_sources(
     sources: np.ndarray,
     iou_threshold: float,
     nms_type: str = "standard",
+    reliabilities: np.ndarray | None = None,
 ) -> np.ndarray:
     boxes = as_boxes(boxes)
     scores = np.asarray(scores, dtype=np.float32).reshape(-1)
     classes = np.asarray(classes, dtype=np.float32).reshape(-1)
     sources = np.asarray(sources, dtype=np.int32).reshape(-1)
+    if reliabilities is not None:
+        reliabilities = np.asarray(reliabilities, dtype=np.float32).reshape(-1)
     if len(boxes) == 0:
         return np.zeros((0,), dtype=np.int64)
     if not (len(boxes) == len(scores) == len(classes) == len(sources)):
         raise ValueError("boxes, scores, classes, and sources must have the same length")
+    if reliabilities is not None and len(reliabilities) != len(boxes):
+        raise ValueError("boxes and reliabilities must have the same length")
 
-    source_aware, base_nms_type = _split_nms_type(nms_type)
-    if not source_aware:
+    priority_mode, base_nms_type = _split_nms_type(nms_type)
+    if priority_mode == "none":
         return class_aware_nms(boxes, scores, classes, iou_threshold, nms_type=base_nms_type)
 
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
         idx = np.flatnonzero(classes.astype(np.int64) == cls)
-        priority_scores = _source_priority_scores(scores[idx], sources[idx])
+        if priority_mode == "source":
+            priority_scores = _source_priority_scores(scores[idx], sources[idx])
+        elif priority_mode == "reliability":
+            cls_reliabilities = None if reliabilities is None else reliabilities[idx]
+            priority_scores = _reliability_priority_scores(scores[idx], cls_reliabilities)
+        else:
+            raise ValueError(f"Unsupported NMS priority mode: {priority_mode!r}")
         keep_local = nms_numpy(boxes[idx], priority_scores, iou_threshold, nms_type=base_nms_type)
         keep_parts.append(idx[keep_local])
     keep = np.concatenate(keep_parts, axis=0) if keep_parts else np.zeros((0,), dtype=np.int64)
@@ -179,6 +233,7 @@ def merge_predictions(
     nms_type: str = "standard",
     cross_class_duplicate_iou: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
+    reliability_parts: list[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -186,16 +241,25 @@ def merge_predictions(
     boxes = np.asarray(boxes, dtype=np.float32).reshape(-1, 4)
     scores = np.asarray(scores, dtype=np.float32).reshape(-1)
     classes = np.asarray(classes, dtype=np.float32).reshape(-1)
+    reliabilities = _reliabilities_from_parts(reliability_parts, len(boxes))
     if len(boxes) == 0:
         return boxes, scores, classes
     boxes = clip_boxes(boxes, image_shape)
     if use_wbf:
         boxes, scores, classes = weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
     else:
-        source_aware, _base_nms_type = _split_nms_type(nms_type)
-        if source_aware:
+        priority_mode, _base_nms_type = _split_nms_type(nms_type)
+        if priority_mode in {"source", "reliability"}:
             sources = np.zeros((len(boxes),), dtype=np.int32)
-            keep = class_aware_nms_with_sources(boxes, scores, classes, sources, merge_iou, nms_type=nms_type)
+            keep = class_aware_nms_with_sources(
+                boxes,
+                scores,
+                classes,
+                sources,
+                merge_iou,
+                nms_type=nms_type,
+                reliabilities=reliabilities,
+            )
         else:
             keep = class_aware_nms(boxes, scores, classes, merge_iou, nms_type=nms_type)
         boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
@@ -213,6 +277,7 @@ def merge_predictions_with_sources(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    reliability_parts: list[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     boxes = np.concatenate(boxes_parts, axis=0) if boxes_parts else np.zeros((0, 4), dtype=np.float32)
     scores = np.concatenate(scores_parts, axis=0) if scores_parts else np.zeros((0,), dtype=np.float32)
@@ -222,6 +287,7 @@ def merge_predictions_with_sources(
     scores = np.asarray(scores, dtype=np.float32).reshape(-1)
     classes = np.asarray(classes, dtype=np.float32).reshape(-1)
     sources = np.asarray(sources, dtype=np.int32).reshape(-1)
+    reliabilities = _reliabilities_from_parts(reliability_parts, len(boxes))
     if len(boxes) == 0:
         return boxes, scores, classes, sources
     boxes = clip_boxes(boxes, image_shape)
@@ -231,7 +297,15 @@ def merge_predictions_with_sources(
         boxes, scores, classes = weighted_box_fusion([boxes], [scores], [classes], iou_threshold=merge_iou)
         sources = _assign_fused_sources(boxes, original_boxes, original_sources)
     else:
-        keep = class_aware_nms_with_sources(boxes, scores, classes, sources, merge_iou, nms_type=nms_type)
+        keep = class_aware_nms_with_sources(
+            boxes,
+            scores,
+            classes,
+            sources,
+            merge_iou,
+            nms_type=nms_type,
+            reliabilities=reliabilities,
+        )
         boxes, scores, classes, sources = boxes[keep], scores[keep], classes[keep], sources[keep]
     keep = cross_class_duplicate_keep(boxes, scores, classes, cross_class_duplicate_iou, cross_class_duplicate_ios)
     return boxes[keep], scores[keep], classes[keep], sources[keep]
@@ -264,6 +338,7 @@ def source_counts_after_merge(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    reliability_parts: list[np.ndarray] | None = None,
 ) -> tuple[int, int]:
     sources_parts = [np.zeros((len(full_boxes),), dtype=np.int32)] + [
         np.full((len(boxes),), index + 1, dtype=np.int32)
@@ -280,6 +355,7 @@ def source_counts_after_merge(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        reliability_parts=reliability_parts,
     )
     return int((sources == 0).sum()), int((sources > 0).sum())
 
@@ -298,6 +374,8 @@ def _novel_candidate_detections_after_merge(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    previous_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     before_boxes, _before_scores, before_classes = merge_predictions(
         image_shape,
@@ -309,6 +387,7 @@ def _novel_candidate_detections_after_merge(
         nms_type=nms_type,
         cross_class_duplicate_iou=cross_class_duplicate_iou,
         cross_class_duplicate_ios=cross_class_duplicate_ios,
+        reliability_parts=previous_reliability_parts,
     )
     candidate_boxes = np.asarray(candidate_boxes, dtype=np.float32).reshape(-1, 4)
     candidate_scores = np.asarray(candidate_scores, dtype=np.float32).reshape(-1)
@@ -323,6 +402,17 @@ def _novel_candidate_detections_after_merge(
         np.zeros((sum(len(boxes) for boxes in previous_boxes_parts),), dtype=np.int32),
         np.ones((len(candidate_boxes),), dtype=np.int32),
     ]
+    reliability_parts = None
+    if previous_reliability_parts is not None or candidate_reliability is not None:
+        previous_reliability_parts = previous_reliability_parts or [
+            np.zeros((len(boxes),), dtype=np.float32) for boxes in previous_boxes_parts
+        ]
+        candidate_reliability = (
+            np.zeros((len(candidate_boxes),), dtype=np.float32)
+            if candidate_reliability is None
+            else np.asarray(candidate_reliability, dtype=np.float32).reshape(-1)
+        )
+        reliability_parts = [*previous_reliability_parts, candidate_reliability]
     after_boxes, after_scores, after_classes, after_sources = merge_predictions_with_sources(
         image_shape,
         merge_iou,
@@ -334,6 +424,7 @@ def _novel_candidate_detections_after_merge(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        reliability_parts=reliability_parts,
     )
     candidate_mask = after_sources == 1
     if not candidate_mask.any():
@@ -376,6 +467,8 @@ def new_detection_gain_after_merge(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    previous_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> int:
     gain, _utility, _max_score = new_detection_stats_after_merge(
         image_shape,
@@ -391,6 +484,8 @@ def new_detection_gain_after_merge(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=previous_reliability_parts,
+        candidate_reliability=candidate_reliability,
     )
     return gain
 
@@ -409,6 +504,8 @@ def new_detection_utility_after_merge(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    previous_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> float:
     _gain, utility, _max_score = new_detection_stats_after_merge(
         image_shape,
@@ -424,6 +521,8 @@ def new_detection_utility_after_merge(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=previous_reliability_parts,
+        candidate_reliability=candidate_reliability,
     )
     return utility
 
@@ -442,6 +541,8 @@ def new_detection_stats_after_merge(
     cross_class_duplicate_ios: float | None = DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     use_wbf: bool = False,
     nms_type: str = "standard",
+    previous_reliability_parts: list[np.ndarray] | None = None,
+    candidate_reliability: np.ndarray | None = None,
 ) -> tuple[int, float, float]:
     boxes, scores, _classes = _novel_candidate_detections_after_merge(
         image_shape,
@@ -457,6 +558,8 @@ def new_detection_stats_after_merge(
         cross_class_duplicate_ios=cross_class_duplicate_ios,
         use_wbf=use_wbf,
         nms_type=nms_type,
+        previous_reliability_parts=previous_reliability_parts,
+        candidate_reliability=candidate_reliability,
     )
     if len(boxes) == 0:
         return 0, 0.0, 0.0
