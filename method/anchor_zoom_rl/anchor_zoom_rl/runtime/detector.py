@@ -52,6 +52,38 @@ class YoloDetector:
         )
         return detections.filter_classes(self.cfg.target_classes), float(elapsed_ms)
 
+    def predict_batch(self, images: list[np.ndarray]) -> tuple[list[Detections], float]:
+        if not images:
+            return [], 0.0
+        start = time.perf_counter()
+        results = self.model.predict(
+            source=images,
+            imgsz=self.imgsz,
+            conf=self.confidence,
+            iou=self.cfg.yolo_iou,
+            max_det=self.cfg.max_detections,
+            classes=list(self.cfg.target_classes) if self.cfg.target_classes else None,
+            device=self.device,
+            verbose=False,
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        
+        batch_detections = []
+        for result in results:
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
+                batch_detections.append(Detections.empty())
+                continue
+            
+            detections = Detections(
+                boxes.xyxy.detach().cpu().numpy(),
+                boxes.conf.detach().cpu().numpy(),
+                boxes.cls.detach().cpu().numpy().astype(np.int64),
+            )
+            batch_detections.append(detections.filter_classes(self.cfg.target_classes))
+            
+        return batch_detections, float(elapsed_ms)
+
 
 class DetectorPair:
     def __init__(self, full_weights: Path, crop_weights: Path, cfg: DetectorConfig) -> None:
@@ -81,3 +113,14 @@ class DetectorPair:
             finally:
                 self.full.crop = False
         return self.crop.predict(crop)
+
+    def predict_crop_batch(self, crops: list[np.ndarray]) -> tuple[list[Detections], float]:
+        if not crops:
+            return [], 0.0
+        if self._shared:
+            self.full.crop = True
+            try:
+                return self.full.predict_batch(crops)
+            finally:
+                self.full.crop = False
+        return self.crop.predict_batch(crops)

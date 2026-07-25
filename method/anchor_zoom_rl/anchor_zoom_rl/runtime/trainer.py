@@ -336,9 +336,59 @@ class AnchorZoomTrainer:
         hard_aux_losses: list[float] = []
         stopped = False
 
+        waitlist_states = []
+        waitlist_masks = []
+        waitlist_actions = []
+        waitlist_rois = []
+        waitlist_overlaps = []
+        waitlist_supervisions = []
+        
+        # Phase 1: Virtual Trajectory
         while True:
             state = environment.state()
             action_mask = environment.action_mask()
+            action = self.agent.select_action(state, action_mask, epsilon)
+            
+            waitlist_states.append(state)
+            waitlist_masks.append(action_mask)
+            waitlist_actions.append(action)
+
+            if action == environment.stop_action:
+                break
+
+            roi = environment.roi_for_action(action)
+            overlap = environment.overlap_with_history(roi)
+            
+            waitlist_rois.append(roi)
+            waitlist_overlaps.append(overlap)
+            
+            # Virtual update
+            environment.record(action, roi, accepted=True, utility=1.0)
+            
+            if environment.done or int(environment.action_mask().sum()) == 1:
+                # Add terminal state and mask for the last transition
+                waitlist_states.append(environment.state())
+                waitlist_masks.append(environment.action_mask())
+                break
+                
+        if learn:
+            self.environment_steps += len(waitlist_actions)
+
+        # Phase 2: Batched Inference
+        crops, crop_batch_ms, _ = self.runner.crop_batch(
+            image,
+            image_path,
+            split,
+            waitlist_rois,
+            use_cache=self.cfg.train.cache_crop_detections,
+        )
+        crop_ms += crop_batch_ms
+        
+        # Phase 3: Compute Rewards and Learn
+        for i, action in enumerate(waitlist_actions):
+            state = waitlist_states[i]
+            action_mask = waitlist_masks[i]
+            
             before = match_stats(
                 predictions,
                 ground_truth,
@@ -353,11 +403,9 @@ class AnchorZoomTrainer:
                 hard_mask,
                 environment,
                 action_mask,
+                waitlist_rois[:i],
             )
-            action = self.agent.select_action(state, action_mask, epsilon)
-            if learn:
-                self.environment_steps += 1
-
+            
             if action == environment.stop_action:
                 stopped = True
                 reward = stop_reward(
@@ -365,7 +413,7 @@ class AnchorZoomTrainer:
                     supervision.reachable_regular_count,
                     self.cfg.reward,
                 )
-                next_state = environment.state()
+                next_state = environment.state() # Fake terminal state
                 next_mask = np.zeros_like(action_mask)
                 next_mask[environment.stop_action] = True
                 transition = Transition(
@@ -385,18 +433,11 @@ class AnchorZoomTrainer:
                     td_losses.extend(item[1] for item in updates)
                     hard_aux_losses.extend(item[2] for item in updates)
                 break
-
-            roi = environment.roi_for_action(action)
-            overlap = environment.overlap_with_history(roi)
-            crop, elapsed_ms, _ = self.runner.crop(
-                image,
-                image_path,
-                split,
-                roi,
-                use_cache=self.cfg.train.cache_crop_detections,
-            )
-            crop_ms += elapsed_ms
-            crop = crop.filter_score(self.cfg.detector.output_confidence)
+                
+            roi = waitlist_rois[i]
+            overlap = waitlist_overlaps[i]
+            crop = crops[i].filter_score(self.cfg.detector.output_confidence)
+            
             utility = crop_utility(
                 crop,
                 predictions,
@@ -456,13 +497,13 @@ class AnchorZoomTrainer:
             if outcome.accepted:
                 predictions = candidate
                 accepted_count += 1
-            environment.record(action, roi, outcome.accepted, outcome.utility)
             total_reward += outcome.reward
             hard_coverage_gain += outcome.hard_coverage_gain
-
-            next_state = environment.state()
-            next_mask = environment.action_mask()
-            done = environment.done or int(next_mask.sum()) == 1
+            
+            next_state = waitlist_states[i+1]
+            next_mask = waitlist_masks[i+1]
+            done = (i == len(waitlist_actions) - 1)
+            
             transition = Transition(
                 state,
                 action,
@@ -558,6 +599,7 @@ class AnchorZoomTrainer:
         hard_mask: np.ndarray,
         environment: AnchorZoomEnvironment,
         action_mask: np.ndarray,
+        attempted_rois: list[np.ndarray],
     ):
         target_mask = np.asarray(action_mask, dtype=bool).copy()
         target_mask[environment.stop_action] = False
@@ -570,7 +612,7 @@ class AnchorZoomTrainer:
             hard_mask,
             action_rois,
             target_mask,
-            environment.attempted_rois,
+            attempted_rois,
         )
 
     def _save_validation_checkpoints(

@@ -81,6 +81,54 @@ class DetectionRunner:
                 self.cache.save(cache_path, signature, local)
         return translate_crop_detections(local, rounded), float(elapsed_ms), cache_hit
 
+    def crop_batch(
+        self,
+        image: np.ndarray,
+        image_path: Path,
+        split: str,
+        rois: list[np.ndarray],
+        use_cache: bool,
+    ) -> tuple[list[Detections], float, list[bool]]:
+        if not rois:
+            return [], 0.0, []
+        
+        results: list[Detections | None] = [None] * len(rois)
+        cache_hits: list[bool] = [False] * len(rois)
+        rounded_rois = [_integer_roi(roi, image.shape[:2]) for roi in rois]
+        signature = _image_bound_signature(self.crop_signature, image_path)
+        
+        needs_inference_indices = []
+        needs_inference_images = []
+        
+        for i, rounded in enumerate(rounded_rois):
+            cache_path = self.cache.crop_path(split, image_path, rounded)
+            local = self.cache.load(cache_path, signature) if use_cache else None
+            if local is not None:
+                results[i] = translate_crop_detections(local, rounded)
+                cache_hits[i] = True
+            else:
+                x1, y1, x2, y2 = rounded.tolist()
+                crop_image = image[y1:y2, x1:x2]
+                if crop_image.size == 0:
+                    results[i] = translate_crop_detections(Detections.empty(), rounded)
+                    if use_cache:
+                        self.cache.save(cache_path, signature, Detections.empty())
+                else:
+                    needs_inference_indices.append(i)
+                    needs_inference_images.append(crop_image)
+        
+        elapsed_ms = 0.0
+        if needs_inference_images:
+            batch_detections, elapsed_ms = self.detectors.predict_crop_batch(needs_inference_images)
+            for img_idx, local in zip(needs_inference_indices, batch_detections):
+                rounded = rounded_rois[img_idx]
+                if use_cache:
+                    cache_path = self.cache.crop_path(split, image_path, rounded)
+                    self.cache.save(cache_path, signature, local)
+                results[img_idx] = translate_crop_detections(local, rounded)
+                
+        return results, float(elapsed_ms), cache_hits
+
     def hard_regions(
         self,
         full_detections: Detections,

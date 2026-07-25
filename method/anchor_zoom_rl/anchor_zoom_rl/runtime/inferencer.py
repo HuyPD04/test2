@@ -117,16 +117,26 @@ class AnchorZoomInferencer:
         crop_cache_hits = 0
         stop_reason = "budget"
 
+        waitlist_actions = []
+        waitlist_hard_probs = []
+        waitlist_rois = []
+        waitlist_overlaps = []
+        waitlist_anchor_indices = []
+        waitlist_zoom_indices = []
+
+        # Phase 1: Virtual Trajectory
         while not environment.done:
             state_start = time.perf_counter()
             state = environment.state()
             mask = environment.action_mask()
             state_ms += (time.perf_counter() - state_start) * 1000.0
+            
             policy_start = time.perf_counter()
             action, hard_probabilities = self.agent.select_action_with_hardness(
                 state, mask
             )
             policy_ms += (time.perf_counter() - policy_start) * 1000.0
+            
             if action == environment.stop_action:
                 stop_reason = "policy_stop"
                 valid_crop = np.asarray(mask, dtype=bool).copy()
@@ -147,15 +157,47 @@ class AnchorZoomInferencer:
 
             roi = environment.roi_for_action(action)
             overlap = environment.overlap_with_history(roi)
-            crop, elapsed_ms, cache_hit = self.runner.crop(
-                image,
-                image_path,
-                split,
+            anchor_index, zoom_index = environment.decode_action(action)
+            
+            waitlist_actions.append(action)
+            waitlist_hard_probs.append(hard_probabilities)
+            waitlist_rois.append(roi)
+            waitlist_overlaps.append(overlap)
+            waitlist_anchor_indices.append(anchor_index)
+            waitlist_zoom_indices.append(zoom_index)
+            
+            # Virtual update
+            environment.record(
+                action,
                 roi,
-                use_cache=self.cfg.inference.cache_crop_detections,
+                accepted=True,
+                utility=1.0,
             )
-            crop_ms += elapsed_ms
-            crop_cache_hits += int(cache_hit)
+
+        # Phase 2: Batched Inference
+        crops, crop_batch_ms, cache_hits = self.runner.crop_batch(
+            image,
+            image_path,
+            split,
+            waitlist_rois,
+            use_cache=self.cfg.inference.cache_crop_detections,
+        )
+        crop_ms += crop_batch_ms
+        crop_cache_hits = sum(cache_hits)
+
+        # Phase 3: Post-processing and Merging
+        # Rebuild the accepted_rois logic since the virtual phase assumed all were accepted.
+        environment.accepted_rois.clear()
+        
+        for i, crop in enumerate(crops):
+            action = waitlist_actions[i]
+            hard_probabilities = waitlist_hard_probs[i]
+            roi = waitlist_rois[i]
+            overlap = waitlist_overlaps[i]
+            anchor_index = waitlist_anchor_indices[i]
+            zoom_index = waitlist_zoom_indices[i]
+            cache_hit = cache_hits[i]
+            
             decision_start = time.perf_counter()
             crop = crop.filter_score(self.cfg.detector.output_confidence)
             raw_crop_detections = len(crop)
@@ -175,7 +217,6 @@ class AnchorZoomInferencer:
                 self.cfg.reward.refinement_score_ratio,
                 self.cfg.reward.refinement_utility_weight,
             )
-            anchor_index, zoom_index = environment.decode_action(action)
             reliability = crop_reliability(
                 crop,
                 predictions,
@@ -192,7 +233,9 @@ class AnchorZoomInferencer:
                 and reliability >= self.cfg.reward.min_reliability
             )
             crop_decision_ms += (time.perf_counter() - decision_start) * 1000.0
+            
             if accepted:
+                environment.accepted_rois.append(np.asarray(roi, dtype=np.float32))
                 merge_start = time.perf_counter()
                 predictions = merge_detections(
                     predictions,
@@ -205,12 +248,7 @@ class AnchorZoomInferencer:
                     self.cfg.detector.cross_class_groups,
                 )
                 merge_ms += (time.perf_counter() - merge_start) * 1000.0
-            environment.record(
-                action,
-                roi,
-                accepted,
-                utility if accepted else 0.0,
-            )
+                
             actions.append(
                 {
                     "action": int(action),
