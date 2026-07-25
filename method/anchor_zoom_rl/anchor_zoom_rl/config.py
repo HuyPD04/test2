@@ -30,11 +30,9 @@ class DetectorConfig:
     duplicate_iou: float = 0.5
     cross_class_iou: float = 0.85
     cross_class_ios: float | None = None
-    cross_class_score_ratio: float = 0.90
+    cross_class_score_ratio: float = 1.0
     cross_class_groups: tuple[tuple[int, ...], ...] = (
-        (0, 1),
         (3, 4, 5, 8),
-        (2, 6, 7, 9),
     )
     max_detections: int = 3000
     target_classes: tuple[int, ...] = tuple(range(10))
