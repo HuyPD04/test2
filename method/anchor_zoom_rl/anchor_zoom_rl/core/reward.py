@@ -91,65 +91,60 @@ def crop_step_outcome(
     reliability: float = 1.0,
     newly_covered_hard: int = 0,
 ) -> StepOutcome:
-    coverage_bonus = min(
-        cfg.hard_coverage_weight * max(int(newly_covered_hard), 0),
-        cfg.hard_coverage_max_bonus,
-    )
+    tp_gain = after.true_positives - before.true_positives
+    hard_tp_gain = after.hard_true_positives - before.hard_true_positives
+    fp_gain = after.false_positives - before.false_positives
+    small_tp_gain = after.small_true_positives - before.small_true_positives
+
     accepted = (
         num_crop_detections >= cfg.min_crop_detections
         and utility >= cfg.min_utility
         and reliability >= cfg.min_reliability
     )
-    if not accepted:
-        if num_crop_detections == 0:
-            reason = "empty"
-        elif utility < cfg.min_utility:
-            reason = "no_gain"
+
+    coverage_bonus = min(
+        cfg.hard_coverage_weight * max(int(newly_covered_hard), 0),
+        cfg.hard_coverage_max_bonus,
+    )
+
+    if newly_covered_hard > 0:
+        reward = (
+            (cfg.tp_weight + cfg.hard_tp_weight) * float(newly_covered_hard)
+            + coverage_bonus
+            - cfg.crop_cost
+            - cfg.overlap_penalty * overlap
+        )
+        reason = "accepted" if accepted else "hard_covered_unmerged"
+    else:
+        if not accepted:
+            if num_crop_detections == 0:
+                reason = "empty"
+            elif utility < cfg.min_utility:
+                reason = "no_gain"
+            else:
+                reason = "low_reliability"
+            penalty = cfg.empty_penalty if num_crop_detections == 0 else cfg.rejected_penalty
         else:
-            reason = "low_reliability"
-        penalty = cfg.empty_penalty if num_crop_detections == 0 else cfg.rejected_penalty
+            reason = "no_hard_gain"
+            penalty = cfg.rejected_penalty
+
         reward = (
             -cfg.crop_cost
             - penalty
             - cfg.overlap_penalty * overlap
             + coverage_bonus
         )
-        return StepOutcome(
-            accepted=False,
-            reward=float(reward),
-            utility=0.0,
-            tp_gain=0,
-            hard_tp_gain=0,
-            fp_gain=0,
-            small_tp_gain=0,
-            hard_coverage_gain=int(newly_covered_hard),
-            reason=reason,
-        )
 
-    tp_gain = after.true_positives - before.true_positives
-    hard_tp_gain = after.hard_true_positives - before.hard_true_positives
-    fp_gain = after.false_positives - before.false_positives
-    small_tp_gain = after.small_true_positives - before.small_true_positives
-    reward = (
-        cfg.utility_weight * utility
-        + cfg.tp_weight * tp_gain
-        + cfg.hard_tp_weight * hard_tp_gain
-        + cfg.small_tp_weight * small_tp_gain
-        - cfg.fp_weight * max(fp_gain, 0)
-        - cfg.crop_cost
-        - cfg.overlap_penalty * overlap
-        + coverage_bonus
-    )
     return StepOutcome(
-        accepted=True,
+        accepted=accepted,
         reward=float(reward),
-        utility=float(utility),
-        tp_gain=int(tp_gain),
-        hard_tp_gain=int(hard_tp_gain),
-        fp_gain=int(fp_gain),
-        small_tp_gain=int(small_tp_gain),
+        utility=float(utility) if accepted else 0.0,
+        tp_gain=int(tp_gain) if accepted else 0,
+        hard_tp_gain=int(hard_tp_gain) if accepted else 0,
+        fp_gain=int(fp_gain) if accepted else 0,
+        small_tp_gain=int(small_tp_gain) if accepted else 0,
         hard_coverage_gain=int(newly_covered_hard),
-        reason="accepted",
+        reason=reason,
     )
 
 

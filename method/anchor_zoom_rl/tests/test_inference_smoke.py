@@ -44,6 +44,9 @@ class FakeRunner:
             False,
         )
 
+    def crop_batch(self, image, image_path, split, rois, use_cache):
+        return [self.crop(image, image_path, split, r, use_cache)[0] for r in rois], 3.0, [False] * len(rois)
+
 
 def test_inference_runs_one_direct_anchor_action(tmp_path: Path) -> None:
     image_path = tmp_path / "image.jpg"

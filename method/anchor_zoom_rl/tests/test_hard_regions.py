@@ -85,8 +85,9 @@ def test_reward_adds_bonus_when_crop_recovers_hard_gt() -> None:
         crop_cost=0.5,
         overlap_penalty=0.0,
         min_utility=0.1,
+        hard_coverage_weight=0.0,
     )
-    outcome = crop_step_outcome(before, after, 0.9, 0.0, 1, cfg)
+    outcome = crop_step_outcome(before, after, 0.9, 0.0, 1, cfg, newly_covered_hard=1)
 
     assert outcome.hard_tp_gain == 1
     assert outcome.reward == 3.0

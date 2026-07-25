@@ -22,15 +22,17 @@ def test_reward_values_new_true_positive_and_crop_cost() -> None:
     cfg = RewardConfig(
         utility_weight=1.0,
         tp_weight=2.0,
+        hard_tp_weight=0.9,
         small_tp_weight=0.0,
         fp_weight=1.0,
         crop_cost=0.5,
         overlap_penalty=0.0,
         min_utility=0.1,
+        hard_coverage_weight=0.0,
     )
     before = match_stats(before_predictions, ground_truth, (100, 100), 0.5, 0.001)
     after = match_stats(after_predictions, ground_truth, (100, 100), 0.5, 0.001)
-    outcome = crop_step_outcome(before, after, 0.9, 0.0, 1, cfg)
+    outcome = crop_step_outcome(before, after, 0.9, 0.0, 1, cfg, newly_covered_hard=1)
 
     assert outcome.accepted
     assert outcome.tp_gain == 1

@@ -47,6 +47,9 @@ class FakeTrainingRunner:
             False,
         )
 
+    def crop_batch(self, image, image_path, split, rois, use_cache):
+        return [self.crop(image, image_path, split, r, use_cache)[0] for r in rois], 3.0, [False] * len(rois)
+
     def hard_regions(
         self,
         full_detections,
