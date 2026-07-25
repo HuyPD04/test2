@@ -51,7 +51,7 @@ environment:
 
 reward:
   match_iou: 0.5
-  hard_low_confidence: 0.10
+  hard_low_confidence: 0.5
   small_area_ratio: 0.0025
   min_crop_detections: 1
   min_utility: 0.15
