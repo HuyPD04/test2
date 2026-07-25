@@ -1,6 +1,6 @@
 paths:
   weights: ../../../yolo11s.pt
-  crop_weights: ../../../yolo11s.pt
+  crop_weights: ../../../yolo11l.pt
   image_root: ../../../data/raw/images
   label_root: ../../../data/raw/labels
   cache_dir: ../../../data/cache_1
@@ -67,7 +67,7 @@ reward:
   small_tp_weight: 0.5
   fp_weight: 1.25
   crop_cost: 0.50
-  overlap_penalty: 0.5
+  overlap_penalty: 1.5
   empty_penalty: 0.8
   rejected_penalty: 0.5
   hard_coverage_weight: 0.10
@@ -117,3 +117,5 @@ inference:
   save_visualization: false
   cache_full_detections: false
   cache_crop_detections: false
+  filter_crop_boundary_boxes: true
+  crop_boundary_margin: 0.01

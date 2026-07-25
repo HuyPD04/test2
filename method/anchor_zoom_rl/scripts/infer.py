@@ -11,6 +11,7 @@ sys.path.insert(0, str(METHOD_ROOT))
 from anchor_zoom_rl.config import load_config
 from anchor_zoom_rl.runtime.data import iter_images
 from anchor_zoom_rl.runtime.inferencer import AnchorZoomInferencer
+from anchor_zoom_rl.runtime.io import save_visdrone_predictions
 
 
 def main() -> None:
@@ -26,6 +27,12 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=None,
+        help="Directory for VisDrone official result txt files.",
+    )
     parser.add_argument("--device", default=None)
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--no-save", action="store_true")
@@ -51,13 +58,21 @@ def main() -> None:
     else:
         split = str(args.split)
         images = iter_images(cfg.paths.image_root, split, args.limit)
+    save_output_dir = output_dir or cfg.paths.output_dir / "infer"
+    results_dir = _resolve_optional(args.results_dir, METHOD_ROOT)
+    if results_dir is None:
+        results_dir = save_output_dir / "results" / split
     for image_path in images:
         result = inferencer.infer_image(
             image_path,
             split=split,
-            output_dir=output_dir,
+            output_dir=save_output_dir,
             save=not args.no_save,
         )
+        official_path = None
+        if not args.no_save:
+            official_path = results_dir / f"{image_path.stem}.txt"
+            save_visdrone_predictions(official_path, result.detections)
         print(
             f"[infer] {image_path.name}: boxes={len(result.detections)} "
             f"crops={len(result.accepted_rois)}/{len(result.attempted_rois)} "
@@ -66,7 +81,10 @@ def main() -> None:
             f"crop={result.timing['crop_detection_ms']:.1f}ms "
             f"policy={result.timing['policy_ms']:.2f}ms "
             f"e2e={result.timing['end_to_end_ms']:.1f}ms"
+            + (f" result={official_path}" if official_path is not None else "")
         )
+    if not args.no_save:
+        print(f"[infer] official VisDrone results: {results_dir}")
 
 
 def _resolve_optional(path: Path | None, root: Path) -> Path | None:

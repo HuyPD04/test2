@@ -110,6 +110,46 @@ def cross_class_duplicate_cleanup(
     return detections.take(kept)
 
 
+def filter_internal_boundary_detections(
+    crop: Detections,
+    roi: np.ndarray,
+    image_shape: tuple[int, int],
+    margin_ratio: float,
+) -> Detections:
+    if len(crop) == 0:
+        return crop
+    if not 0.0 <= float(margin_ratio) < 0.5:
+        raise ValueError("margin_ratio must be in [0, 0.5)")
+
+    image_height, image_width = image_shape
+    rounded = np.asarray(
+        [
+            np.floor(float(roi[0])),
+            np.floor(float(roi[1])),
+            np.ceil(float(roi[2])),
+            np.ceil(float(roi[3])),
+        ],
+        dtype=np.float32,
+    )
+    rounded[[0, 2]] = np.clip(rounded[[0, 2]], 0, image_width)
+    rounded[[1, 3]] = np.clip(rounded[[1, 3]], 0, image_height)
+    width = max(float(rounded[2] - rounded[0]), 1.0)
+    height = max(float(rounded[3] - rounded[1]), 1.0)
+    margin_x = width * float(margin_ratio)
+    margin_y = height * float(margin_ratio)
+
+    boundary = np.zeros((len(crop),), dtype=bool)
+    if rounded[0] > 0:
+        boundary |= crop.boxes[:, 0] <= rounded[0] + margin_x
+    if rounded[1] > 0:
+        boundary |= crop.boxes[:, 1] <= rounded[1] + margin_y
+    if rounded[2] < image_width:
+        boundary |= crop.boxes[:, 2] >= rounded[2] - margin_x
+    if rounded[3] < image_height:
+        boundary |= crop.boxes[:, 3] >= rounded[3] - margin_y
+    return crop.take(np.flatnonzero(~boundary))
+
+
 def crop_reliability(
     crop: Detections,
     current: Detections,

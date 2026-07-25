@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from anchor_zoom_rl.core.postprocess import (
     crop_reliability,
     crop_utility,
+    filter_internal_boundary_detections,
     merge_detections,
 )
 from anchor_zoom_rl.core.types import Detections
@@ -63,6 +65,30 @@ def test_crop_reliability_penalizes_boundary_noise() -> None:
     poor = crop_reliability(boundary, current, roi, 0.1, 0.0, 0.5)
     assert good > 0.7
     assert poor < 0.35
+
+
+def test_boundary_filter_removes_only_internal_slice_edges() -> None:
+    crop = Detections(
+        np.asarray(
+            [
+                [0.0, 20.0, 10.0, 30.0],
+                [30.0, 10.4, 40.0, 25.0],
+                [30.0, 30.0, 40.0, 40.0],
+                [80.0, 30.0, 89.5, 40.0],
+            ],
+            dtype=np.float32,
+        ),
+        np.asarray([0.9, 0.8, 0.7, 0.6], dtype=np.float32),
+        np.asarray([0, 0, 0, 0], dtype=np.int64),
+    )
+    filtered = filter_internal_boundary_detections(
+        crop,
+        np.asarray([0.0, 10.0, 90.0, 90.0], dtype=np.float32),
+        image_shape=(100, 100),
+        margin_ratio=0.01,
+    )
+
+    assert filtered.scores.tolist() == pytest.approx([0.9, 0.7])
 
 
 def test_crop_refinement_has_utility_and_reliability() -> None:

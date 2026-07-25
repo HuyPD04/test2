@@ -95,6 +95,17 @@ python scripts/infer.py --split test
 Kết quả detection được ghi thẳng theo format VisDrone chính thức:
 `x,y,w,h,score,class_id_1_based,-1,-1`.
 
+Ngoài các file nội bộ trong `predictions/`, infer ghi thêm bộ kết quả benchmark
+vào `results/<split>/`. Có thể chọn đích khác bằng `--results-dir`, ví dụ:
+
+```powershell
+python scripts/infer.py --split test --results-dir ..\..\benchmark_official\results\test
+```
+
+Mặc định, crop detections nằm trong dải 1% sát biên trong của slice bị loại trước
+utility và merge. Cạnh slice trùng với cạnh ảnh gốc không bị lọc. Điều khiển bằng
+`inference.filter_crop_boundary_boxes` và `inference.crop_boundary_margin`.
+
 Đánh giá AP50 và latency:
 
 ```powershell

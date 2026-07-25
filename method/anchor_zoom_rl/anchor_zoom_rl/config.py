@@ -140,6 +140,8 @@ class InferenceConfig:
     save_visualization: bool = False
     cache_full_detections: bool = False
     cache_crop_detections: bool = False
+    filter_crop_boundary_boxes: bool = True
+    crop_boundary_margin: float = 0.01
 
 
 @dataclass(slots=True)
@@ -247,6 +249,8 @@ def load_config(path: str | Path) -> MethodConfig:
         raise ValueError("train.hard_aux_loss_weight cannot be negative")
     if cfg.train.hard_aux_positive_weight_max < 1.0:
         raise ValueError("train.hard_aux_positive_weight_max must be at least 1")
+    if not 0.0 <= cfg.inference.crop_boundary_margin < 0.5:
+        raise ValueError("inference.crop_boundary_margin must be in [0, 0.5)")
     if cfg.train.sampling_mode not in {
         "shuffled_epochs",
         "random_with_replacement",

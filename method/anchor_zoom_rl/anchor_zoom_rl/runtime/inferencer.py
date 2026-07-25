@@ -9,7 +9,12 @@ import numpy as np
 
 from ..config import MethodConfig
 from ..core.anchors import generate_anchors
-from ..core.postprocess import crop_reliability, crop_utility, merge_detections
+from ..core.postprocess import (
+    crop_reliability,
+    crop_utility,
+    filter_internal_boundary_detections,
+    merge_detections,
+)
 from ..core.types import Detections
 from ..rl.agent import DQNAgent
 from .data import read_image
@@ -153,6 +158,15 @@ class AnchorZoomInferencer:
             crop_cache_hits += int(cache_hit)
             decision_start = time.perf_counter()
             crop = crop.filter_score(self.cfg.detector.output_confidence)
+            raw_crop_detections = len(crop)
+            if self.cfg.inference.filter_crop_boundary_boxes:
+                crop = filter_internal_boundary_detections(
+                    crop,
+                    roi,
+                    image.shape[:2],
+                    self.cfg.inference.crop_boundary_margin,
+                )
+            boundary_detections_removed = raw_crop_detections - len(crop)
             utility = crop_utility(
                 crop,
                 predictions,
@@ -207,6 +221,8 @@ class AnchorZoomInferencer:
                     "roi": roi.tolist(),
                     "overlap": float(overlap),
                     "crop_detections": len(crop),
+                    "raw_crop_detections": int(raw_crop_detections),
+                    "boundary_detections_removed": int(boundary_detections_removed),
                     "utility": float(utility),
                     "reliability": float(reliability),
                     "predicted_hardness": (

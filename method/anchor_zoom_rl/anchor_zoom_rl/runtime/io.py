@@ -13,12 +13,18 @@ from ..core.types import Detections
 def save_visdrone_predictions(path: Path, detections: Detections) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
-    for box, score, class_id in zip(
-        detections.boxes, detections.scores, detections.classes, strict=True
-    ):
+    order = np.argsort(-detections.scores, kind="stable")
+    for index in order:
+        box = detections.boxes[index]
+        score = detections.scores[index]
+        class_id = detections.classes[index]
         x1, y1, x2, y2 = (float(value) for value in box)
+        width = max(x2 - x1, 0.0)
+        height = max(y2 - y1, 0.0)
+        if width <= 0.0 or height <= 0.0:
+            continue
         lines.append(
-            f"{x1:.2f},{y1:.2f},{max(x2 - x1, 0.0):.2f},{max(y2 - y1, 0.0):.2f},"
+            f"{x1:.2f},{y1:.2f},{width:.2f},{height:.2f},"
             f"{float(score):.6f},{int(class_id) + 1},-1,-1"
         )
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
