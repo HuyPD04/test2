@@ -14,8 +14,8 @@ state:
   use_history: true
 
 env:
-  max_steps: 7
-  max_slices: 6
+  max_steps: 5
+  max_slices: 4
   initial_slice_fraction: 0.28
   move_fraction: 0.65
   zoom_factor: 0.75
@@ -105,6 +105,7 @@ train:
   use_curriculum: true
   curriculum_steps: 15000
   use_crop_outcome_reward: true
+  crop_use_cache: true
   crop_detection_reward: 0.5
   crop_tp_reward: 3.0
   crop_fp_penalty: 1.5
@@ -115,29 +116,3 @@ train:
   accepted_no_hard_penalty: 0.0
   rejected_crop_penalty: 0.5
   crop_attempt_penalty: 0.25
-
-query_rl:
-  max_steps: 6
-  max_slices: 6
-  candidate_topk: 32
-  min_query_score: 0.03
-  candidate_overlap_threshold: 0.65
-  slice_fraction: 0.28
-  dense_slice_fraction: 0.22
-  min_slice_fraction: 0.10
-  max_slice_fraction: 0.35
-  density_zoom_threshold: 0.18
-  objectness_weight: 1.0
-  proposal_weight: 0.9
-  density_weight: 0.8
-  small_weight: 0.6
-  spatial_weight: 0.2
-  crop_cost: 0.15
-  overlap_penalty: 1.0
-  rejected_penalty: 0.4
-  query_reward_weight: 0.25
-  hard_hit_reward: 2.0
-  crop_reward_scale: 0.2
-  stop_bonus: 0.2
-  stop_early_penalty: 0.5
-  require_query_candidates: true

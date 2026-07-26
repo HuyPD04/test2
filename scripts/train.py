@@ -14,10 +14,9 @@ from rl_sahi.common.device import print_device_info
 from rl_sahi.common.data import iter_images
 from rl_sahi.eval.benchmark import BenchmarkConfig
 from rl_sahi.inference.config import InferenceConfig
+from rl_sahi.rl.batched_trainer import TrainConfig, batched_train_dqn
 from rl_sahi.rl.env_config import EnvConfig
 from rl_sahi.rl.state_config import StateConfig
-from rl_sahi.rl.trainer import TrainConfig
-from rl_sahi.rl.batched_trainer import batched_train_dqn
 
 
 def _bool_value(value) -> bool:
@@ -36,7 +35,9 @@ def _optional_float(value, default: float | None = None) -> float | None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train DQN to choose one adaptive slice from cached YOLO state.")
+    parser = argparse.ArgumentParser(
+        description="Train the batched DQN to select adaptive slices from cached YOLO state."
+    )
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--split", default="train", choices=["train", "val", "test"])
     parser.add_argument("--episodes", type=int, default=None)
@@ -251,7 +252,7 @@ def main() -> None:
             target_classes=target_classes,
             class_mapping=class_mapping,
         ),
-        eval_use_cache=bool(infer_cfg.get("use_cache", True)),
+        eval_use_cache=bool(train_cfg.crop_use_cache),
     )
     print(f"[train] best checkpoint: {checkpoint}")
 

@@ -20,7 +20,7 @@ from rl_sahi.common.config import load_default_config
 from rl_sahi.common.data import iter_images, read_image
 from rl_sahi.common.device import print_device_info, resolve_torch_device
 from rl_sahi.common.boxes import iou_matrix
-from rl_sahi.detection.yolo import load_yolo
+from rl_sahi.detection.yolo import load_yolo_variants
 from rl_sahi.eval.benchmark import (
     BenchmarkConfig,
     _evaluate_method,
@@ -574,9 +574,12 @@ def main() -> None:
 
     small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg, annotation_root)
     detector_device_t = resolve_torch_device(infer_cfg.device)
-    model = load_yolo(weights, device=detector_device_t)
-    full_model = load_yolo(full_weights, device=detector_device_t) if full_weights else model
-    crop_model = load_yolo(crop_weights, device=detector_device_t) if crop_weights else model
+    model, full_model, crop_model = load_yolo_variants(
+        weights,
+        device=detector_device_t,
+        full_weights=full_weights,
+        crop_weights=crop_weights,
+    )
     device_t = resolve_torch_device(infer_cfg.policy_device or infer_cfg.device)
     policy, checkpoint_data = load_policy(checkpoint, device_t)
     env_cfg = checkpoint_data["env_cfg_obj"]

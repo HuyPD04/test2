@@ -11,7 +11,7 @@ sys.path.insert(0, str(METHOD_ROOT))
 from anchor_zoom_rl.config import load_config
 from anchor_zoom_rl.runtime.data import iter_images
 from anchor_zoom_rl.runtime.inferencer import AnchorZoomInferencer
-from anchor_zoom_rl.runtime.io import save_visdrone_predictions
+from anchor_zoom_rl.runtime.io import save_predictions, save_visdrone_predictions
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
         "--results-dir",
         type=Path,
         default=None,
-        help="Directory for VisDrone official result txt files.",
+        help="Directory for prediction result txt files (YOLO format).",
     )
     parser.add_argument("--device", default=None)
     parser.add_argument("--visualize", action="store_true")
@@ -72,7 +72,7 @@ def main() -> None:
         official_path = None
         if not args.no_save:
             official_path = results_dir / f"{image_path.stem}.txt"
-            save_visdrone_predictions(official_path, result.detections)
+            save_predictions(official_path, result.detections)
         print(
             f"[infer] {image_path.name}: boxes={len(result.detections)} "
             f"crops={len(result.accepted_rois)}/{len(result.attempted_rois)} "
@@ -84,7 +84,7 @@ def main() -> None:
             + (f" result={official_path}" if official_path is not None else "")
         )
     if not args.no_save:
-        print(f"[infer] official VisDrone results: {results_dir}")
+        print(f"[infer] YOLO prediction results: {results_dir}")
 
 
 def _resolve_optional(path: Path | None, root: Path) -> Path | None:

@@ -1,5 +1,5 @@
 detect:
-  imgsz: 640
+  imgsz: 896
   conf: 0.01
   iou: 0.7
   max_det: 3000

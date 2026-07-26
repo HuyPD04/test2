@@ -284,16 +284,22 @@ class CropOutcomeEvaluator:
             missing_metadata.append(metadata)
 
         if missing_indices:
-            predictions = run_yolo_on_crops(
-                self.model,
-                missing_paths,
-                missing_rois,
-                imgsz=self.cfg.slice_imgsz,
-                conf=self.cfg.output_conf,
-                iou=self.cfg.iou,
-                max_det=self.cfg.max_det,
-                device=self.cfg.device,
-            )
+            predictions: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+            batch_size = max(int(self.cfg.crop_batch_size), 1)
+            for start in range(0, len(missing_paths), batch_size):
+                end = start + batch_size
+                predictions.extend(
+                    run_yolo_on_crops(
+                        self.model,
+                        missing_paths[start:end],
+                        missing_rois[start:end],
+                        imgsz=self.cfg.slice_imgsz,
+                        conf=self.cfg.output_conf,
+                        iou=self.cfg.iou,
+                        max_det=self.cfg.max_det,
+                        device=self.cfg.device,
+                    )
+                )
             for index, path, metadata, prediction in zip(
                 missing_indices,
                 missing_cache_paths,

@@ -19,7 +19,7 @@ from ..core.types import Detections
 from ..rl.agent import DQNAgent
 from .data import read_image
 from .environment import AnchorZoomEnvironment
-from .io import save_json, save_visdrone_predictions, save_visualization
+from .io import save_json, save_predictions, save_visualization
 from .prediction import DetectionRunner
 
 
@@ -320,7 +320,7 @@ class AnchorZoomInferencer:
     ) -> None:
         output_dir = Path(output_dir)
         if self.cfg.inference.save_predictions:
-            save_visdrone_predictions(
+            save_predictions(
                 output_dir / "predictions" / f"{result.image_path.stem}.txt",
                 result.detections,
             )

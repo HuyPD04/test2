@@ -15,7 +15,7 @@ from rl_sahi.rl.env_config import EnvConfig
 from rl_sahi.rl.crop_outcome import CropOutcome
 from rl_sahi.rl.slice_env import SliceEnv
 from rl_sahi.rl.state_config import BASE_MAP_CHANNELS, StateConfig
-from rl_sahi.rl.trainer import TrainConfig, _terminal_reward_with_crop_outcome
+from rl_sahi.rl.batched_trainer import TrainConfig, _terminal_reward_with_crop_outcome
 
 
 def _detection_cache() -> DetectionCache:

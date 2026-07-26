@@ -151,6 +151,25 @@ def load_yolo(weights: Path, device: DeviceLike = None):
         return LegacyYOLOWrapper(weights, device)
 
 
+def load_yolo_variants(
+    weights: Path,
+    device: DeviceLike = None,
+    full_weights: Path | None = None,
+    crop_weights: Path | None = None,
+):
+    """Load state/full/crop detectors once per unique weights path."""
+    loaded: dict[str, object] = {}
+
+    def get_model(path: Path | None):
+        resolved_path = Path(weights if path is None else path).expanduser().resolve()
+        key = str(resolved_path)
+        if key not in loaded:
+            loaded[key] = load_yolo(resolved_path, device=device)
+        return loaded[key]
+
+    return get_model(weights), get_model(full_weights), get_model(crop_weights)
+
+
 def detect_one_image(
     model: YOLO,
     image_path: Path,

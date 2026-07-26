@@ -10,7 +10,7 @@ import numpy as np
 from ..core.types import Detections
 
 
-def save_visdrone_predictions(path: Path, detections: Detections) -> None:
+def save_predictions(path: Path, detections: Detections) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     order = np.argsort(-detections.scores, kind="stable")
@@ -19,15 +19,15 @@ def save_visdrone_predictions(path: Path, detections: Detections) -> None:
         score = detections.scores[index]
         class_id = detections.classes[index]
         x1, y1, x2, y2 = (float(value) for value in box)
-        width = max(x2 - x1, 0.0)
-        height = max(y2 - y1, 0.0)
-        if width <= 0.0 or height <= 0.0:
+        if x2 <= x1 or y2 <= y1:
             continue
-        lines.append(
-            f"{x1:.2f},{y1:.2f},{width:.2f},{height:.2f},"
-            f"{float(score):.6f},{int(class_id) + 1},-1,-1"
-        )
+        lines.append(f"{int(class_id)} {float(score):.6f} {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} 0")
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def save_visdrone_predictions(path: Path, detections: Detections) -> None:
+    save_predictions(path, detections)
+
 
 
 def save_json(path: Path, value: dict[str, Any]) -> None:

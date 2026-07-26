@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.rl.replay import ReplayBuffer
-from rl_sahi.rl.trainer import optimize
+from rl_sahi.rl.batched_trainer import optimize
 
 
 class StaticQ(torch.nn.Module):

@@ -23,7 +23,7 @@ from rl_sahi.common.class_mapping import ClassMapping
 from rl_sahi.common.config import ProjectConfig, load_default_config
 from rl_sahi.common.data import read_image
 from rl_sahi.common.device import DeviceLike, resolve_torch_device
-from rl_sahi.detection.yolo import detect_one_image, load_yolo
+from rl_sahi.detection.yolo import detect_one_image, load_yolo_variants
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.inference.crops import run_yolo_on_crops
 from rl_sahi.inference.merge import (
@@ -460,9 +460,9 @@ def get_initial_detection(
         if weights is not None
         else None
     )
-    if cache_root is not None and split is not None:
+    if cache_root is not None and split is not None and use_cache:
         cache_path = detection_cache_path(cache_root, split, image_path)
-        if use_cache and detection_cache_is_current(cache_path, expected_metadata):
+        if detection_cache_is_current(cache_path, expected_metadata):
             return load_detection_cache(cache_path)
         det = detect_one_image(
             model=model,
@@ -533,9 +533,12 @@ class AdaptiveSahiInferencer:
             "checkpoint": file_fingerprint(Path(checkpoint)),
             "inference_config": asdict(cfg),
         }
-        self.yolo = load_yolo(weights, device=self.yolo_device_t)
-        self.full_yolo = load_yolo(full_weights, device=self.yolo_device_t) if full_weights else self.yolo
-        self.crop_yolo = load_yolo(crop_weights, device=self.yolo_device_t) if crop_weights else self.yolo
+        self.yolo, self.full_yolo, self.crop_yolo = load_yolo_variants(
+            self.weights,
+            device=self.yolo_device_t,
+            full_weights=self.full_weights,
+            crop_weights=self.crop_weights,
+        )
 
     def infer_image(
         self,

@@ -30,7 +30,7 @@ from rl_sahi.common.data import (
     read_yolo_labels,
 )
 from rl_sahi.common.device import resolve_torch_device
-from rl_sahi.detection.yolo import load_yolo
+from rl_sahi.detection.yolo import load_yolo_variants
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.inference.crops import run_yolo_on_crops
 from rl_sahi.inference.merge import (
@@ -1457,9 +1457,12 @@ def benchmark_split(
     )
     small_threshold = _resolve_small_area_threshold(images, image_root, label_root, bench_cfg, annotation_root)
     detector_device_t = resolve_torch_device(infer_cfg.device)
-    model = load_yolo(weights, device=detector_device_t)
-    full_model = load_yolo(full_weights, device=detector_device_t) if full_weights else model
-    crop_model = load_yolo(crop_weights, device=detector_device_t) if crop_weights else model
+    model, full_model, crop_model = load_yolo_variants(
+        weights,
+        device=detector_device_t,
+        full_weights=full_weights,
+        crop_weights=crop_weights,
+    )
     sahi_model = (
         _load_sahi_detection_model(weights, bench_cfg, detector_device_t)
         if bench_cfg.include_sahi_library
