@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.inference.crops import run_yolo_on_crops
+from rl_sahi.inference.pipeline import _infer_with_loaded
 
 
 class _EmptyResult:
@@ -58,6 +59,11 @@ class _BoxModel:
 
 
 class InferenceCropTest(unittest.TestCase):
+    def test_pipeline_crop_runner_is_not_shadowed_by_a_local_import(self) -> None:
+        # _infer_with_loaded must use the module-level crop runner when state
+        # and full-image detection share the same YOLO instance.
+        self.assertNotIn("run_yolo_on_crops", _infer_with_loaded.__code__.co_varnames)
+
     def test_source_image_avoids_reloading_the_same_file(self) -> None:
         source = np.zeros((100, 120, 3), dtype=np.uint8)
         rois = [

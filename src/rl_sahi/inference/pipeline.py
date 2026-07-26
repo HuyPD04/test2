@@ -646,7 +646,6 @@ def _infer_with_loaded(
     slice_meta: list[dict] = []
 
     if full_yolo is not yolo:
-        from rl_sahi.inference.crops import run_yolo_on_crops
         full_preds = run_yolo_on_crops(
             full_yolo,
             [image_path],
