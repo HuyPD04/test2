@@ -38,7 +38,13 @@ class ProjectConfig:
         return str(value)
 
     def feature_layers(self, section: str) -> tuple[int, ...]:
-        value = self.section(section).get("feature_layers", [10])
+        return self._layer_indices(section, "feature_layers", [10])
+
+    def spatial_feature_layers(self, section: str) -> tuple[int, ...]:
+        return self._layer_indices(section, "spatial_feature_layers", [6])
+
+    def _layer_indices(self, section: str, key: str, default: list[int]) -> tuple[int, ...]:
+        value = self.section(section).get(key, default)
         if isinstance(value, str):
             return tuple(int(x.strip()) for x in value.split(",") if x.strip())
         return tuple(int(x) for x in value)

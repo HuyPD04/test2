@@ -12,7 +12,7 @@ import numpy as np
 from .data import image_id
 
 
-DETECTION_CACHE_VERSION = 4
+DETECTION_CACHE_VERSION = 5
 HARD_REGION_CACHE_VERSION = 1
 
 
@@ -27,6 +27,7 @@ class DetectionCache:
     feature_layers: tuple[int, ...]
     objectness_map: np.ndarray
     spatial_feature_map: np.ndarray
+    spatial_feature_layers: tuple[int, ...] = (6,)
     metadata: dict[str, Any] | None = None
 
 
@@ -96,6 +97,7 @@ def detection_cache_metadata(
     iou: float,
     max_det: int,
     feature_layers: tuple[int, ...],
+    spatial_feature_layers: tuple[int, ...],
     aux_grid_size: int,
     spatial_feature_channels: int,
 ) -> dict[str, Any]:
@@ -106,6 +108,7 @@ def detection_cache_metadata(
         "iou": float(iou),
         "max_det": int(max_det),
         "feature_layers": tuple(int(x) for x in feature_layers),
+        "spatial_feature_layers": tuple(int(x) for x in spatial_feature_layers),
         "aux_grid_size": int(aux_grid_size),
         "spatial_feature_channels": int(spatial_feature_channels),
     }
@@ -124,6 +127,7 @@ def save_detection_cache(path: Path, cache: DetectionCache) -> None:
         classes=cache.classes.astype(np.float32),
         feature=cache.feature.astype(np.float32),
         feature_layers=np.asarray(cache.feature_layers, dtype=np.int32),
+        spatial_feature_layers=np.asarray(cache.spatial_feature_layers, dtype=np.int32),
         objectness_map=cache.objectness_map.astype(np.float32),
         spatial_feature_map=cache.spatial_feature_map.astype(np.float32),
     )
@@ -190,6 +194,7 @@ def detection_cache_is_current(path: Path, expected_metadata: dict[str, Any] | N
             and "metadata_json" in data.files
             and "objectness_map" in data.files
             and "spatial_feature_map" in data.files
+            and "spatial_feature_layers" in data.files
             and (
                 expected_metadata is None
                 or _compare_metadata(str(data["metadata_json"].item()), expected_metadata)
@@ -220,6 +225,11 @@ def load_detection_cache(path: Path) -> DetectionCache:
             feature_layers=tuple(int(x) for x in data["feature_layers"].tolist()),
             objectness_map=objectness_map,
             spatial_feature_map=spatial_feature_map,
+            spatial_feature_layers=(
+                tuple(int(x) for x in data["spatial_feature_layers"].tolist())
+                if "spatial_feature_layers" in data.files
+                else ()
+            ),
             metadata=(
                 json.loads(str(data["metadata_json"].item()))
                 if "metadata_json" in data.files

@@ -29,7 +29,7 @@ from rl_sahi.rl.state_config import StateConfig
 from rl_sahi.rl.state_layout import state_layout_from_detection
 from rl_sahi.rl.crop_outcome import CropOutcome, CropOutcomeEvaluator
 
-TRAINING_FLOW_VERSION = 3
+TRAINING_FLOW_VERSION = 5
 
 
 @dataclass(slots=True)
@@ -292,6 +292,7 @@ def _greedy_eval_episode(
             previous_covered=previous_covered,
             target_classes=target_classes,
             class_mapping=class_mapping,
+            seed_rank=_attempt_idx,
         )
         state = env.reset()
         info = {}
@@ -717,7 +718,7 @@ def batched_train_dqn(
         resume_data = _torch_load_checkpoint(resume_path)
         if int(resume_data.get("version", -1)) != TRAINING_FLOW_VERSION:
             raise ValueError(
-                "Resume checkpoint was created by the old sequential crop flow. "
+                "Resume checkpoint uses an incompatible state/reward flow. "
                 "Start a fresh batched run with --no-resume."
             )
         if not metadata_matches(resume_data.get("detection_metadata"), detection_metadata):
@@ -833,6 +834,7 @@ def batched_train_dqn(
             previous_covered=previous_covered,
             target_classes=target_classes,
             class_mapping=class_mapping,
+            seed_rank=0,
         )
         return EnvWorker(
             episode=episode, det=det, hard=hard, previous_rois=[], attempted_rois=[], previous_covered=previous_covered,
@@ -1017,6 +1019,7 @@ def batched_train_dqn(
                         previous_covered=worker.previous_covered,
                         target_classes=target_classes,
                         class_mapping=class_mapping,
+                        seed_rank=worker.attempt_idx,
                     )
                     worker.state = worker.env.reset()
                 continue

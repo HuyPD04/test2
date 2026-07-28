@@ -6,6 +6,8 @@ detect:
   device: "cuda"
   feature_layers:
     - 16
+  spatial_feature_layers:
+    - 6
 
 hard_region:
   small_area_ratio: 0.01

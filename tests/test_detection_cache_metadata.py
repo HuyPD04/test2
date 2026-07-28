@@ -33,6 +33,7 @@ def _cache(metadata: dict) -> DetectionCache:
         feature_layers=(10,),
         objectness_map=np.zeros((1, 16, 16), dtype=np.float32),
         spatial_feature_map=np.zeros((4, 16, 16), dtype=np.float32),
+        spatial_feature_layers=(6,),
         metadata=metadata,
     )
 
@@ -56,6 +57,7 @@ class DetectionCacheMetadataTest(unittest.TestCase):
             loaded = load_detection_cache(path)
 
         self.assertEqual(loaded.metadata, metadata)
+        self.assertEqual(loaded.spatial_feature_layers, (6,))
 
     def test_hard_region_metadata_invalidates_stale_cache(self) -> None:
         metadata = {"target_classes": (0, 2), "small_area_ratio": 0.0004}

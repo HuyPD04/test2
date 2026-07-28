@@ -34,9 +34,11 @@ from rl_sahi.inference.crops import run_yolo_on_crops
 from rl_sahi.inference.merge import merge_predictions_with_sources
 from rl_sahi.inference.pipeline import (
     _attempt_overlap,
+    _crop_box_reliability,
     _crop_rejection_reason,
     _filter_classes,
     _new_detection_stats,
+    _slice_predictions_for_merge,
     _skip_crop_reason,
     filter_boundary_boxes,
     get_initial_detection,
@@ -97,10 +99,13 @@ def _build_configs(cfg, policy_device: str | None) -> tuple[InferenceConfig, Ben
         device=device,
         policy_device=policy_device,
         feature_layers=cfg.feature_layers("infer"),
+        spatial_feature_layers=cfg.spatial_feature_layers("infer"),
         min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
         min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),
         min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
-        duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
+            duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
+            boundary_margin=float(infer_cfg.get("boundary_margin", 2.0)),
+            append_novel_only=_bool_value(infer_cfg.get("append_novel_only", False)),
         cross_class_duplicate_iou=_optional_float(infer_cfg.get("cross_class_duplicate_iou"), 0.85),
         cross_class_duplicate_ios=_optional_float(infer_cfg.get("cross_class_duplicate_ios"), 0.95),
         max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),
@@ -357,6 +362,7 @@ def _collect_parts(
     accepted_boxes: list[np.ndarray] = []
     accepted_scores: list[np.ndarray] = []
     accepted_classes: list[np.ndarray] = []
+    accepted_reliability: list[np.ndarray] = []
     candidate_boxes: list[np.ndarray] = []
     candidate_scores: list[np.ndarray] = []
     candidate_classes: list[np.ndarray] = []
@@ -364,11 +370,20 @@ def _collect_parts(
     attempted_rois: list[np.ndarray] = []
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
 
-    def accept_prediction(roi: np.ndarray, prediction) -> None:
+    def accept_prediction(roi: np.ndarray, prediction, info: dict | None = None) -> None:
+        info = info or {}
         boxes_i, scores_i, classes_i = prediction
         classes_i = cfg.class_mapping.map_model_classes(classes_i)
         boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
-        boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
+        boxes_i, scores_i, classes_i = filter_boundary_boxes(
+            boxes_i,
+            scores_i,
+            classes_i,
+            roi,
+            det.image_shape,
+            margin=max(float(cfg.boundary_margin), 0.0),
+        )
+        reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
         candidate_boxes.append(boxes_i)
         candidate_scores.append(scores_i)
         candidate_classes.append(classes_i)
@@ -389,13 +404,33 @@ def _collect_parts(
             cfg.cross_class_duplicate_ios,
             use_wbf=cfg.use_wbf,
             nms_type=cfg.nms_type,
+            slice_reliability_parts=accepted_reliability,
+            candidate_reliability=reliability_i,
         )
         if _crop_rejection_reason(len(boxes_i), gain, utility, max_score, cfg) is not None:
             return
         accepted_rois.append(roi)
+        boxes_i, scores_i, classes_i, reliability_i = _slice_predictions_for_merge(
+            full_boxes,
+            full_scores,
+            full_classes,
+            accepted_boxes,
+            accepted_scores,
+            accepted_classes,
+            accepted_reliability,
+            boxes_i,
+            scores_i,
+            classes_i,
+            reliability_i,
+            roi,
+            det.image_shape,
+            info,
+            cfg,
+        )
         accepted_boxes.append(boxes_i)
         accepted_scores.append(scores_i)
         accepted_classes.append(classes_i)
+        accepted_reliability.append(reliability_i)
 
     if cfg.batched_inference:
         rois: list[np.ndarray] = []
@@ -416,6 +451,7 @@ def _collect_parts(
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
+                seed_rank=attempt_idx - 1,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -433,8 +469,15 @@ def _collect_parts(
                 state_cfg,
                 cfg.target_classes,
                 cfg.class_mapping,
+                high_conf_threshold=env_cfg.high_conf_threshold,
+                high_conf_penalty=env_cfg.roi_prefilter_high_conf_penalty,
             )
-            selected = select_roi_candidates(roi_scores, cfg.roi_prefilter_topk)
+            selected = select_roi_candidates(
+                roi_scores,
+                cfg.roi_prefilter_topk,
+                rois=rois,
+                overlap_threshold=env_cfg.roi_prefilter_overlap_threshold,
+            )
             rois = [rois[index] for index in selected]
         if rois:
             predictions = run_yolo_on_crops(
@@ -480,6 +523,7 @@ def _collect_parts(
                     target_classes=cfg.target_classes,
                     class_mapping=cfg.class_mapping,
                     static_context=env_static,
+                    seed_rank=attempt_idx - 1,
                 )
                 roi, _actions, info = rollout_one_slice(policy, env, device_t)
                 repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -627,6 +671,7 @@ def main() -> None:
             max_det=infer_cfg.max_det,
             device=infer_cfg.device,
             feature_layers=infer_cfg.feature_layers,
+            spatial_feature_layers=infer_cfg.spatial_feature_layers,
             aux_grid_size=state_cfg.grid_size,
             spatial_feature_channels=state_cfg.spatial_feature_channels,
             cache_root=cache_root,

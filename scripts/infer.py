@@ -37,6 +37,13 @@ def main() -> None:
     parser.add_argument("--split", default=None, choices=["train", "val", "test"])
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--policy-device", default=None)
+    parser.add_argument("--merge-iou", type=float, default=None)
+    parser.add_argument("--nms-type", default=None)
+    parser.add_argument("--boundary-margin", type=float, default=None)
+    merge_group = parser.add_mutually_exclusive_group()
+    merge_group.add_argument("--append-novel-only", dest="append_novel_only", action="store_true")
+    merge_group.add_argument("--append-all-crop-boxes", dest="append_novel_only", action="store_false")
+    parser.set_defaults(append_novel_only=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--visualize", action="store_true")
@@ -72,6 +79,17 @@ def main() -> None:
         save_visualization = True
     if args.no_visualize:
         save_visualization = False
+    merge_iou = float(infer_cfg["merge_iou"]) if args.merge_iou is None else float(args.merge_iou)
+    boundary_margin = (
+        float(infer_cfg.get("boundary_margin", 2.0))
+        if args.boundary_margin is None
+        else max(float(args.boundary_margin), 0.0)
+    )
+    append_novel_only = (
+        _bool_value(infer_cfg.get("append_novel_only", False))
+        if args.append_novel_only is None
+        else bool(args.append_novel_only)
+    )
     try:
         crop_weights = cfg.path_value("crop_weights")
     except KeyError:
@@ -92,15 +110,18 @@ def main() -> None:
             full_conf=float(infer_cfg["full_conf"]),
             output_conf=float(infer_cfg["output_conf"]),
             iou=float(infer_cfg["iou"]),
-            merge_iou=float(infer_cfg["merge_iou"]),
+            merge_iou=merge_iou,
             max_det=int(infer_cfg["max_det"]),
             device=device,
             policy_device=policy_device,
             feature_layers=cfg.feature_layers("infer"),
+            spatial_feature_layers=cfg.spatial_feature_layers("infer"),
             min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
             min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),
             min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
             duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
+            boundary_margin=boundary_margin,
+            append_novel_only=append_novel_only,
             cross_class_duplicate_iou=_optional_float(infer_cfg.get("cross_class_duplicate_iou"), 0.85),
             cross_class_duplicate_ios=_optional_float(infer_cfg.get("cross_class_duplicate_ios"), 0.95),
             max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),
@@ -115,7 +136,7 @@ def main() -> None:
             save_visualization=save_visualization,
             batched_inference=_bool_value(infer_cfg.get("batched_inference", False)),
             use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
-            nms_type=str(infer_cfg.get("nms_type", "standard")),
+            nms_type=str(infer_cfg.get("nms_type", "standard")) if args.nms_type is None else str(args.nms_type),
             class_mapping=ClassMapping.from_config(cfg.section("classes")),
         ),
     )

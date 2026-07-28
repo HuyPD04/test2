@@ -31,6 +31,7 @@ from rl_sahi.inference.merge import (
     DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     accepts_novel_detections,
     merge_predictions_with_sources,
+    _novel_candidate_detections_after_merge,
     new_detection_gain_after_merge,
     new_detection_stats_after_merge,
     new_detection_utility_after_merge,
@@ -310,6 +311,52 @@ def _new_detection_stats(
     )
 
 
+def _slice_predictions_for_merge(
+    full_boxes: np.ndarray,
+    full_scores: np.ndarray,
+    full_classes: np.ndarray,
+    slice_boxes_parts: list[np.ndarray],
+    slice_scores_parts: list[np.ndarray],
+    slice_classes_parts: list[np.ndarray],
+    slice_reliability_parts: list[np.ndarray],
+    candidate_boxes: np.ndarray,
+    candidate_scores: np.ndarray,
+    candidate_classes: np.ndarray,
+    candidate_reliability: np.ndarray,
+    roi: np.ndarray,
+    image_shape: tuple[int, int],
+    info: dict,
+    cfg: InferenceConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return accepted crop boxes that should reach the final image merge."""
+    if not cfg.append_novel_only:
+        return candidate_boxes, candidate_scores, candidate_classes, candidate_reliability
+
+    boxes, scores, classes = _novel_candidate_detections_after_merge(
+        image_shape,
+        cfg.merge_iou,
+        [full_boxes, *slice_boxes_parts],
+        [full_scores, *slice_scores_parts],
+        [full_classes, *slice_classes_parts],
+        candidate_boxes,
+        candidate_scores,
+        candidate_classes,
+        duplicate_iou=cfg.duplicate_iou,
+        cross_class_duplicate_iou=cfg.cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
+        use_wbf=cfg.use_wbf,
+        nms_type=cfg.nms_type,
+        previous_reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            include=True,
+        ),
+        candidate_reliability=candidate_reliability,
+    )
+    reliability = _crop_box_reliability(boxes, roi, image_shape, info)
+    return boxes, scores, classes, reliability
+
+
 def _accept_slice(gain: int, utility: float, max_score: float, cfg: InferenceConfig) -> bool:
     return accepts_novel_detections(
         gain,
@@ -377,6 +424,7 @@ def _checkpoint_detection_mismatches(
         "iou": float(cfg.iou),
         "max_det": int(cfg.max_det),
         "feature_layers": tuple(int(x) for x in cfg.feature_layers),
+        "spatial_feature_layers": tuple(int(x) for x in cfg.spatial_feature_layers),
         "aux_grid_size": int(state_cfg.grid_size),
         "spatial_feature_channels": int(state_cfg.spatial_feature_channels),
     }
@@ -396,7 +444,7 @@ def _checkpoint_detection_mismatches(
         if key not in metadata:
             continue
         actual_value = metadata[key]
-        if key == "feature_layers":
+        if key in {"feature_layers", "spatial_feature_layers"}:
             actual_value = tuple(int(x) for x in actual_value)
         elif isinstance(expected_value, int):
             actual_value = int(actual_value)
@@ -440,6 +488,7 @@ def get_initial_detection(
     feature_layers: tuple[int, ...],
     aux_grid_size: int,
     spatial_feature_channels: int,
+    spatial_feature_layers: tuple[int, ...] = (6,),
     cache_root: Path | str | None = None,
     split: str | None = None,
     use_cache: bool = True,
@@ -454,6 +503,7 @@ def get_initial_detection(
             iou=full_iou,
             max_det=max_det,
             feature_layers=feature_layers,
+            spatial_feature_layers=spatial_feature_layers,
             aux_grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
         )
@@ -473,6 +523,7 @@ def get_initial_detection(
             max_det=max_det,
             device=device,
             feature_layers=feature_layers,
+            spatial_feature_layers=spatial_feature_layers,
             aux_grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
             timing=timing,
@@ -490,6 +541,7 @@ def get_initial_detection(
         max_det=max_det,
         device=device,
         feature_layers=feature_layers,
+        spatial_feature_layers=spatial_feature_layers,
         aux_grid_size=aux_grid_size,
         spatial_feature_channels=spatial_feature_channels,
         timing=timing,
@@ -565,6 +617,7 @@ class AdaptiveSahiInferencer:
             max_det=cfg.max_det,
             device=cfg.device,
             feature_layers=cfg.feature_layers,
+            spatial_feature_layers=cfg.spatial_feature_layers,
             aux_grid_size=self.state_cfg.grid_size,
             spatial_feature_channels=self.state_cfg.spatial_feature_channels,
             cache_root=cache_root,
@@ -712,6 +765,7 @@ def _infer_with_loaded(
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
+                seed_rank=attempt_idx - 1,
             )
             timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
             roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
@@ -754,8 +808,17 @@ def _infer_with_loaded(
                 state_cfg,
                 cfg.target_classes,
                 cfg.class_mapping,
+                high_conf_threshold=env_cfg.high_conf_threshold,
+                high_conf_penalty=env_cfg.roi_prefilter_high_conf_penalty,
             )
-            selected_indices = set(select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk))
+            selected_indices = set(
+                select_roi_candidates(
+                    candidate_scores,
+                    cfg.roi_prefilter_topk,
+                    rois=[roi for _, roi, _, _ in candidate_rois],
+                    overlap_threshold=env_cfg.roi_prefilter_overlap_threshold,
+                )
+            )
             selected_candidates: list[tuple[int, np.ndarray, list[str], dict]] = []
             for index, (cand_attempt_idx, roi, actions, info) in enumerate(candidate_rois):
                 score = float(candidate_scores[index])
@@ -808,7 +871,15 @@ def _infer_with_loaded(
             ):
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
-                boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
+                boxes_i, scores_i, classes_i = filter_boundary_boxes(
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    roi,
+                    det.image_shape,
+                    margin=max(float(cfg.boundary_margin), 0.0),
+                )
+                raw_detection_count = int(len(boxes_i))
                 reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes, full_scores, full_classes,
@@ -830,13 +901,39 @@ def _infer_with_loaded(
                 )
                 accepted = rejection_reason is None
                 slice_index = None
+                merge_boxes_i = boxes_i
+                merge_scores_i = scores_i
+                merge_classes_i = classes_i
+                merge_reliability_i = reliability_i
                 if accepted:
+                    (
+                        merge_boxes_i,
+                        merge_scores_i,
+                        merge_classes_i,
+                        merge_reliability_i,
+                    ) = _slice_predictions_for_merge(
+                        full_boxes,
+                        full_scores,
+                        full_classes,
+                        slice_boxes_all,
+                        slice_scores_all,
+                        slice_classes_all,
+                        slice_reliability_all,
+                        boxes_i,
+                        scores_i,
+                        classes_i,
+                        reliability_i,
+                        roi,
+                        det.image_shape,
+                        info,
+                        cfg,
+                    )
                     accepted_rois.append(roi)
                     slice_index = len(accepted_rois)
-                    slice_boxes_all.append(boxes_i)
-                    slice_scores_all.append(scores_i)
-                    slice_classes_all.append(classes_i)
-                    slice_reliability_all.append(reliability_i)
+                    slice_boxes_all.append(merge_boxes_i)
+                    slice_scores_all.append(merge_scores_i)
+                    slice_classes_all.append(merge_classes_i)
+                    slice_reliability_all.append(merge_reliability_i)
                 else:
                     rejected_rois.append(roi)
                 slice_meta.append(
@@ -851,7 +948,8 @@ def _infer_with_loaded(
                         "old_slice_overlap": float(info.get("old_slice_overlap", 0.0)),
                         "attempted_slice_overlap": float(info.get("attempted_slice_overlap", 0.0)),
                         "stop_due_to_stalled_roi": bool(info.get("stop_due_to_stalled_roi", False)),
-                        "detections": int(len(boxes_i)),
+                        "detections": raw_detection_count,
+                        "detections_retained_for_merge": int(len(merge_boxes_i)) if accepted else 0,
                         "new_detections_after_nms": int(new_detection_gain),
                         "new_detection_utility": float(new_detection_utility),
                         "new_detection_max_score": float(new_detection_max_score),
@@ -902,6 +1000,7 @@ def _infer_with_loaded(
                     target_classes=cfg.target_classes,
                     class_mapping=cfg.class_mapping,
                     static_context=env_static,
+                    seed_rank=attempt_idx - 1,
                 )
                 timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
                 roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
@@ -966,7 +1065,15 @@ def _infer_with_loaded(
             ):
                 classes_i = cfg.class_mapping.map_model_classes(classes_i)
                 boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
-                boxes_i, scores_i, classes_i = filter_boundary_boxes(boxes_i, scores_i, classes_i, roi, det.image_shape)
+                boxes_i, scores_i, classes_i = filter_boundary_boxes(
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    roi,
+                    det.image_shape,
+                    margin=max(float(cfg.boundary_margin), 0.0),
+                )
+                raw_detection_count = int(len(boxes_i))
                 reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
                     full_boxes,
@@ -994,14 +1101,40 @@ def _infer_with_loaded(
                 )
                 accepted = rejection_reason is None
                 slice_index = None
+                merge_boxes_i = boxes_i
+                merge_scores_i = scores_i
+                merge_classes_i = classes_i
+                merge_reliability_i = reliability_i
                 if accepted:
+                    (
+                        merge_boxes_i,
+                        merge_scores_i,
+                        merge_classes_i,
+                        merge_reliability_i,
+                    ) = _slice_predictions_for_merge(
+                        full_boxes,
+                        full_scores,
+                        full_classes,
+                        slice_boxes_all,
+                        slice_scores_all,
+                        slice_classes_all,
+                        slice_reliability_all,
+                        boxes_i,
+                        scores_i,
+                        classes_i,
+                        reliability_i,
+                        roi,
+                        det.image_shape,
+                        info,
+                        cfg,
+                    )
                     consecutive_rejections = 0
                     accepted_rois.append(roi)
                     slice_index = len(accepted_rois)
-                    slice_boxes_all.append(boxes_i)
-                    slice_scores_all.append(scores_i)
-                    slice_classes_all.append(classes_i)
-                    slice_reliability_all.append(reliability_i)
+                    slice_boxes_all.append(merge_boxes_i)
+                    slice_scores_all.append(merge_scores_i)
+                    slice_classes_all.append(merge_classes_i)
+                    slice_reliability_all.append(merge_reliability_i)
                 else:
                     consecutive_rejections += 1
                     rejected_rois.append(roi)
@@ -1017,7 +1150,8 @@ def _infer_with_loaded(
                         "old_slice_overlap": float(info.get("old_slice_overlap", 0.0)),
                         "attempted_slice_overlap": float(info.get("attempted_slice_overlap", 0.0)),
                         "stop_due_to_stalled_roi": bool(info.get("stop_due_to_stalled_roi", False)),
-                        "detections": int(len(boxes_i)),
+                        "detections": raw_detection_count,
+                        "detections_retained_for_merge": int(len(merge_boxes_i)) if accepted else 0,
                         "new_detections_after_nms": int(new_detection_gain),
                         "new_detection_utility": float(new_detection_utility),
                         "new_detection_max_score": float(new_detection_max_score),
@@ -1143,6 +1277,17 @@ def _feature_layers_or_config(cfg: ProjectConfig, value: tuple[int, ...] | list[
     return tuple(int(x) for x in value)
 
 
+def _spatial_feature_layers_or_config(
+    cfg: ProjectConfig,
+    value: tuple[int, ...] | list[int] | str | None,
+) -> tuple[int, ...]:
+    if value is None:
+        return cfg.spatial_feature_layers("infer")
+    if isinstance(value, str):
+        return tuple(int(x.strip()) for x in value.split(",") if x.strip())
+    return tuple(int(x) for x in value)
+
+
 def _int_tuple_value(value: tuple[int, ...] | list[int] | str | None) -> tuple[int, ...]:
     if value is None:
         return ()
@@ -1169,10 +1314,13 @@ def infer_one_image(
     device: str | None = None,
     policy_device: str | None = None,
     feature_layers: tuple[int, ...] | list[int] | str | None = None,
+    spatial_feature_layers: tuple[int, ...] | list[int] | str | None = None,
     min_slice_detections: int | None = None,
     min_slice_utility: float | None = None,
     min_new_detection_score: float | None = None,
     duplicate_iou: float | None = None,
+    boundary_margin: float | None = None,
+    append_novel_only: bool | None = None,
     cross_class_duplicate_iou: float | None = None,
     cross_class_duplicate_ios: float | None = None,
     max_slice_attempts: int | None = None,
@@ -1213,6 +1361,7 @@ def infer_one_image(
             else project_cfg.optional_str("infer", "policy_device")
         ),
         feature_layers=_feature_layers_or_config(project_cfg, feature_layers),
+        spatial_feature_layers=_spatial_feature_layers_or_config(project_cfg, spatial_feature_layers),
         min_slice_detections=_value_or_config(infer_cfg, "min_slice_detections", min_slice_detections, int),
         min_slice_utility=(
             float(infer_cfg.get("min_slice_utility", 0.5))
@@ -1228,6 +1377,16 @@ def infer_one_image(
             float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5)))
             if duplicate_iou is None
             else float(duplicate_iou)
+        ),
+        boundary_margin=(
+            float(infer_cfg.get("boundary_margin", 2.0))
+            if boundary_margin is None
+            else max(float(boundary_margin), 0.0)
+        ),
+        append_novel_only=(
+            _bool_value(infer_cfg.get("append_novel_only", False))
+            if append_novel_only is None
+            else _bool_value(append_novel_only)
         ),
         cross_class_duplicate_iou=_optional_float_or_config(
             infer_cfg,

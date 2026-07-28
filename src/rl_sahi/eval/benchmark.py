@@ -43,6 +43,7 @@ from rl_sahi.inference.pipeline import (
     _crop_box_reliability,
     _filter_classes,
     _new_detection_stats,
+    _slice_predictions_for_merge,
     _skip_crop_reason,
     filter_boundary_boxes,
     get_initial_detection,
@@ -752,6 +753,7 @@ def _predict_rl_sahi(
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
+                seed_rank=attempt_idx - 1,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -772,8 +774,15 @@ def _predict_rl_sahi(
                     state_cfg,
                     cfg.target_classes,
                     cfg.class_mapping,
+                    high_conf_threshold=env_cfg.high_conf_threshold,
+                    high_conf_penalty=env_cfg.roi_prefilter_high_conf_penalty,
                 )
-                selected = select_roi_candidates(candidate_scores, cfg.roi_prefilter_topk)
+                selected = select_roi_candidates(
+                    candidate_scores,
+                    cfg.roi_prefilter_topk,
+                    rois=candidate_rois,
+                    overlap_threshold=env_cfg.roi_prefilter_overlap_threshold,
+                )
                 candidate_rois = [candidate_rois[index] for index in selected]
                 candidate_infos = [
                     {**candidate_infos[index], "roi_prefilter_score": float(candidate_scores[index])}
@@ -799,7 +808,12 @@ def _predict_rl_sahi(
                     cfg.target_classes,
                 )
                 boxes_i, scores_i, classes_i = filter_boundary_boxes(
-                    boxes_i, scores_i, classes_i, roi, det.image_shape
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    roi,
+                    det.image_shape,
+                    margin=max(float(cfg.boundary_margin), 0.0),
                 )
                 reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
                 new_detection_gain, new_detection_utility, new_detection_max_score = (
@@ -833,6 +847,23 @@ def _predict_rl_sahi(
                 ) is not None:
                     continue
                 accepted_rois.append(roi)
+                boxes_i, scores_i, classes_i, reliability_i = _slice_predictions_for_merge(
+                    full_boxes,
+                    full_scores,
+                    full_classes,
+                    slice_boxes_all,
+                    slice_scores_all,
+                    slice_classes_all,
+                    slice_reliability_all,
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    reliability_i,
+                    roi,
+                    det.image_shape,
+                    info,
+                    cfg,
+                )
                 slice_boxes_all.append(boxes_i)
                 slice_scores_all.append(scores_i)
                 slice_classes_all.append(classes_i)
@@ -890,6 +921,7 @@ def _predict_rl_sahi(
                 target_classes=cfg.target_classes,
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
+                seed_rank=attempt_idx - 1,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -924,7 +956,12 @@ def _predict_rl_sahi(
             classes_i = cfg.class_mapping.map_model_classes(classes_i)
             boxes_i, scores_i, classes_i = _filter_classes(boxes_i, scores_i, classes_i, cfg.target_classes)
             boxes_i, scores_i, classes_i = filter_boundary_boxes(
-                boxes_i, scores_i, classes_i, roi, det.image_shape
+                boxes_i,
+                scores_i,
+                classes_i,
+                roi,
+                det.image_shape,
+                margin=max(float(cfg.boundary_margin), 0.0),
             )
             reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
             new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
@@ -958,6 +995,23 @@ def _predict_rl_sahi(
                 continue
             consecutive_rejections = 0
             accepted_rois.append(roi)
+            boxes_i, scores_i, classes_i, reliability_i = _slice_predictions_for_merge(
+                full_boxes,
+                full_scores,
+                full_classes,
+                slice_boxes_all,
+                slice_scores_all,
+                slice_classes_all,
+                slice_reliability_all,
+                boxes_i,
+                scores_i,
+                classes_i,
+                reliability_i,
+                roi,
+                det.image_shape,
+                info,
+                cfg,
+            )
             slice_boxes_all.append(boxes_i)
             slice_scores_all.append(scores_i)
             slice_classes_all.append(classes_i)
@@ -1373,6 +1427,7 @@ def evaluate_rl_sahi_policy(
             max_det=infer_cfg.max_det,
             device=infer_cfg.device,
             feature_layers=infer_cfg.feature_layers,
+            spatial_feature_layers=infer_cfg.spatial_feature_layers,
             aux_grid_size=state_cfg.grid_size,
             spatial_feature_channels=state_cfg.spatial_feature_channels,
             cache_root=cache_root,
@@ -1547,6 +1602,7 @@ def benchmark_split(
             max_det=infer_cfg.max_det,
             device=infer_cfg.device,
             feature_layers=infer_cfg.feature_layers,
+            spatial_feature_layers=infer_cfg.spatial_feature_layers,
             aux_grid_size=state_cfg.grid_size,
             spatial_feature_channels=state_cfg.spatial_feature_channels,
             cache_root=cache_root,

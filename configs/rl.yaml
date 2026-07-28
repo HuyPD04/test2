@@ -31,10 +31,24 @@ env:
   high_conf_threshold: 0.5
   old_slice_overlap_threshold: 0.5
   min_new_hits_to_accept: 1
+  seed_topk: 4
+  seed_nms_radius: 2
+  seed_min_score: 0.02
+  residual_objectness_weight: 0.5
+  residual_proposal_weight: 1.0
+  residual_small_weight: 0.5
+  residual_high_conf_penalty: 1.25
+  residual_previous_penalty: 1.0
+  residual_history_penalty: 0.25
+  roi_prefilter_high_conf_penalty: 1.0
+  roi_prefilter_overlap_threshold: 0.35
   use_gpu_box_ops: true
   gpu_box_device: "cuda"
   use_simplified_reward: true
   target_reward: 0.75
+  hard_coverage_progress_reward: 0.5
+  empty_hard_penalty: 1.0
+  repeated_hard_penalty: 0.5
   efficiency_weight: 0.5
   constraint_weight: 3.0
   stop_bonus_weight: 0.5
@@ -42,6 +56,7 @@ env:
   empty_slice_penalty: 0.5
   area_penalty: 0.35
   detected_overlap_penalty: 1.0
+  detected_overlap_count_norm: 3.0
   attempted_overlap_penalty: 2.0
   new_hard_reward: 0.5
   hard_density_reward: 0.2

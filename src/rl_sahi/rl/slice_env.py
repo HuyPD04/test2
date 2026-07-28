@@ -59,6 +59,8 @@ class SliceEnv:
         target_classes: tuple[int, ...] = (),
         class_mapping: ClassMapping | None = None,
         static_context: SliceEnvStaticContext | None = None,
+        seed_rank: int = 0,
+        seed_target: np.ndarray | None = None,
     ) -> None:
         self.detection = detection
         self.hard_regions = hard_regions
@@ -67,6 +69,12 @@ class SliceEnv:
         self.target_classes = tuple(int(x) for x in target_classes)
         self.class_mapping = class_mapping or ClassMapping()
         self.image_shape = detection.image_shape
+        self.seed_rank = max(int(seed_rank), 0)
+        self.seed_target = (
+            None
+            if seed_target is None
+            else np.asarray(seed_target, dtype=np.float32).reshape(2).copy()
+        )
         static = static_context or self.build_static_context(
             detection,
             self.state_cfg,
@@ -475,36 +483,112 @@ class SliceEnv:
             return Action.STOP
         return self._action_toward_target(candidate_centers[target_idx], candidate_boxes[[target_idx]])
 
-    def _heatmap_target(self) -> tuple[np.ndarray, float] | None:
-        obj = np.asarray(self.detection.objectness_map, dtype=np.float32)
-        if obj.size == 0:
-            return None
+    def _residual_heatmap(self, include_previous: bool = True) -> np.ndarray:
+        """Return detector uncertainty after subtracting already-solved regions."""
         grid_size = self.state_cfg.grid_size
-        obj = np.nan_to_num(obj.reshape(-1, grid_size, grid_size), nan=0.0, posinf=0.0, neginf=0.0)
-        heat = obj.max(axis=0)
-        if self.detection_map.shape[0] > 2:
-            density = np.clip(self.detection_map[2] * self.state_cfg.count_norm / 10.0, 0.0, 1.0)
-            heat = np.maximum(heat * 0.7, density)
-        if heat.size == 0:
-            return None
-        priority = heat.copy()
-        previous_map = np.asarray(self.previous_slice_map, dtype=np.float32)
-        priority -= 0.6 * previous_map
-        priority -= 0.2 * np.asarray(self.history, dtype=np.float32)
-        blocked = previous_map >= 0.5
-        if blocked.any() and (~blocked).any():
-            masked = priority.copy()
-            masked[blocked] = -np.inf
-            finite = np.isfinite(masked)
-            if finite.any() and float(masked[finite].max()) > 0.02:
-                priority = masked
-        y, x = np.unravel_index(int(priority.argmax()), priority.shape)
-        score = float(priority[y, x])
-        if score <= 0.02:
-            return None
-        h, w = self.image_shape
-        target = np.array([(x + 0.5) * w / grid_size, (y + 0.5) * h / grid_size], dtype=np.float32)
-        return target, score
+        obj = np.asarray(self.detection.objectness_map, dtype=np.float32)
+        if obj.size:
+            objectness = np.nan_to_num(
+                obj.reshape(-1, grid_size, grid_size).max(axis=0),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+        else:
+            objectness = np.zeros((grid_size, grid_size), dtype=np.float32)
+
+        zeros = np.zeros((grid_size, grid_size), dtype=np.float32)
+        high_conf = (
+            np.asarray(self.detection_map[0], dtype=np.float32)
+            if self.detection_map.shape[0] > 0
+            else zeros
+        )
+        proposal = (
+            np.asarray(self.detection_map[1], dtype=np.float32)
+            if self.detection_map.shape[0] > 1
+            else zeros
+        )
+        density = (
+            np.clip(
+                self.detection_map[2] * self.state_cfg.count_norm / 10.0,
+                0.0,
+                1.0,
+            ).astype(np.float32)
+            if self.detection_map.shape[0] > 2
+            else zeros
+        )
+        small = (
+            np.asarray(self.detection_map[3], dtype=np.float32)
+            if self.detection_map.shape[0] > 3
+            else zeros
+        )
+        uncertain = np.maximum(proposal, density)
+        cfg = self.env_cfg
+        priority = (
+            float(cfg.residual_objectness_weight) * objectness
+            + float(cfg.residual_proposal_weight) * uncertain
+            + float(cfg.residual_small_weight) * small
+            - float(cfg.residual_high_conf_penalty) * high_conf
+        ).astype(np.float32)
+
+        if include_previous:
+            previous_map = np.asarray(self.previous_slice_map, dtype=np.float32)
+            history = np.asarray(self.history, dtype=np.float32)
+            priority -= float(cfg.residual_previous_penalty) * previous_map
+            priority -= float(cfg.residual_history_penalty) * history
+            blocked = previous_map >= 0.5
+            if blocked.any() and (~blocked).any():
+                priority = priority.copy()
+                priority[blocked] = -np.inf
+        return np.nan_to_num(
+            priority,
+            nan=-np.inf,
+            posinf=np.finfo(np.float32).max,
+            neginf=-np.inf,
+        )
+
+    def _heatmap_targets(
+        self,
+        top_k: int | None = None,
+        include_previous: bool = True,
+    ) -> list[tuple[np.ndarray, float]]:
+        """Extract spatially distinct residual peaks with grid-space NMS."""
+        priority = self._residual_heatmap(include_previous=include_previous).copy()
+        if priority.size == 0:
+            return []
+        limit = max(int(top_k if top_k is not None else self.env_cfg.seed_topk), 1)
+        radius = max(int(self.env_cfg.seed_nms_radius), 0)
+        min_score = float(self.env_cfg.seed_min_score)
+        grid_size = self.state_cfg.grid_size
+        image_h, image_w = self.image_shape
+        targets: list[tuple[np.ndarray, float]] = []
+
+        for _ in range(limit):
+            flat_index = int(priority.argmax())
+            y, x = np.unravel_index(flat_index, priority.shape)
+            score = float(priority[y, x])
+            if not np.isfinite(score) or score <= min_score:
+                break
+            point = np.array(
+                [
+                    (x + 0.5) * image_w / grid_size,
+                    (y + 0.5) * image_h / grid_size,
+                ],
+                dtype=np.float32,
+            )
+            targets.append((point, score))
+
+            if radius <= 0:
+                priority[y, x] = -np.inf
+                continue
+            ys, xs = np.ogrid[:grid_size, :grid_size]
+            suppress = (ys - y) ** 2 + (xs - x) ** 2 <= radius**2
+            priority[suppress] = -np.inf
+        return targets
+
+    def _heatmap_target(self) -> tuple[np.ndarray, float] | None:
+        targets = self._heatmap_targets(top_k=1, include_previous=True)
+        return targets[0] if targets else None
 
     def _proposal_seed_target(self) -> np.ndarray | None:
         boxes = self.det_boxes
@@ -629,8 +713,21 @@ class SliceEnv:
         h, w = self.image_shape
         _min_side, max_side = self._side_limits()
         side = min(min(h, w) * self.env_cfg.initial_slice_fraction, max_side)
-        heatmap_target = self._heatmap_target()
-        target = heatmap_target[0] if heatmap_target is not None else self._proposal_seed_target()
+        target = self.seed_target
+        if target is None:
+            ranked_targets = self._heatmap_targets(
+                top_k=max(int(self.env_cfg.seed_topk), self.seed_rank + 1),
+                include_previous=False,
+            )
+            if self.seed_rank < len(ranked_targets):
+                target = ranked_targets[self.seed_rank][0]
+        if target is None:
+            heatmap_target = self._heatmap_target()
+            target = (
+                heatmap_target[0]
+                if heatmap_target is not None
+                else self._proposal_seed_target()
+            )
         if target is None:
             target = np.array([w / 2.0, h / 2.0], dtype=np.float32)
         return box_from_center(float(target[0]), float(target[1]), side, self.image_shape)
@@ -839,6 +936,7 @@ class SliceEnv:
         det_mask = self.det_scores >= self.env_cfg.high_conf_threshold
         if not det_mask.any():
             return 0.0
+        normalizer = max(float(self.env_cfg.detected_overlap_count_norm), 1e-6)
         if self.box_device is not None and self.high_conf_det_boxes_t is not None and len(self.high_conf_det_boxes_t) > 0:
             roi_t = torch.as_tensor(self.roi.reshape(1, 4), dtype=torch.float32, device=self.box_device)
             boxes = self.high_conf_det_boxes_t
@@ -849,10 +947,10 @@ class SliceEnv:
             inter = (x2 - x1).clamp_min(0.0) * (y2 - y1).clamp_min(0.0)
             box_area = ((boxes[:, 2] - boxes[:, 0]).clamp_min(0.0) * (boxes[:, 3] - boxes[:, 1]).clamp_min(0.0)).clamp_min(1e-6)
             cover = inter[0] / box_area
-            return float((cover.sum() / max(int(boxes.shape[0]), 1)).clamp(0.0, 1.0).item())
+            return float((cover.sum() / normalizer).clamp(0.0, 1.0).item())
         det_boxes = self.det_boxes[det_mask]
         det_cover = ioa_matrix(self.roi.reshape(1, 4), det_boxes)[0]
-        return float(np.clip(det_cover.sum() / max(len(det_boxes), 1), 0.0, 1.0))
+        return float(np.clip(det_cover.sum() / normalizer, 0.0, 1.0))
 
     def _roi_grid_window(self, roi: np.ndarray | None = None) -> tuple[int, int, int, int]:
         roi = self.roi if roi is None else np.asarray(roi, dtype=np.float32).reshape(4)
@@ -991,14 +1089,31 @@ class SliceEnv:
         target_score = float(target_scores[new_mask].sum()) if len(target_scores) else 0.0
         hit_count = int(hit_mask.sum()) if len(hit_mask) else 0
         total_target_score = float(target_scores[hit_mask].sum()) if len(target_scores) else 0.0
+        candidate_target_score = (
+            float(target_scores[candidate_new_mask].sum())
+            if len(target_scores)
+            else 0.0
+        )
+        retained_hits = (
+            int((hit_mask & prev_covered).sum()) if len(hit_mask) else 0
+        )
         roi_area_ratio = self._roi_area_ratio()
         compactness = 1.0 - min(roi_area_ratio / max(self.env_cfg.max_roi_area_ratio, 1e-6), 1.0)
         compactness_score = total_target_score * compactness
         previous_compactness_score = 0.0
+        previous_candidate_target_score = 0.0
+        previous_candidate_hits = 0
         if previous_roi is not None and len(self.hard_boxes) > 0:
             previous_scores, previous_hit_mask = self._hard_target_scores(previous_roi)
             previous_total_score = (
                 float(previous_scores[previous_hit_mask].sum()) if len(previous_scores) else 0.0
+            )
+            previous_candidate_mask = previous_hit_mask & ~prev_covered
+            previous_candidate_hits = int(previous_candidate_mask.sum())
+            previous_candidate_target_score = (
+                float(previous_scores[previous_candidate_mask].sum())
+                if len(previous_scores)
+                else 0.0
             )
             previous_area_ratio = self._roi_area_ratio(previous_roi)
             previous_compactness = 1.0 - min(
@@ -1007,6 +1122,7 @@ class SliceEnv:
             )
             previous_compactness_score = previous_total_score * previous_compactness
         compactness_delta = compactness_score - previous_compactness_score
+        hard_coverage_progress = float(candidate_hits - previous_candidate_hits)
         scale_gain = self._scale_gain()
         old_slice_overlap = self._old_slice_overlap()
         attempted_slice_overlap = self._attempted_slice_overlap()
@@ -1021,7 +1137,12 @@ class SliceEnv:
             "hit_count": hit_count,
             "target_score": target_score,
             "total_target_score": total_target_score,
-            "retained_hits": int((hit_mask & prev_covered).sum()) if len(hit_mask) else 0,
+            "candidate_target_score": candidate_target_score,
+            "previous_candidate_target_score": previous_candidate_target_score,
+            "previous_candidate_hits": previous_candidate_hits,
+            "hard_coverage_progress": hard_coverage_progress,
+            "empty_hard_roi": bool(len(self.hard_boxes) > 0 and candidate_hits == 0),
+            "retained_hits": retained_hits,
             "compactness_score": compactness_score,
             "compactness_delta": compactness_delta,
             "observable_score": observable_score,
@@ -1037,6 +1158,19 @@ class SliceEnv:
             reward += cfg.target_reward * float(new_hits)
             density = target_score * cfg.max_roi_area_ratio / max(roi_area_ratio, 1e-6)
             reward += cfg.target_reward * 0.3 * float(np.clip(density, 0.0, 3.0))
+
+        if len(self.hard_boxes) > 0:
+            if action != Action.STOP:
+                reward += cfg.hard_coverage_progress_reward * float(
+                    np.clip(hard_coverage_progress, -4.0, 4.0)
+                )
+            if candidate_hits == 0:
+                empty_scale = 1.0 if action == Action.STOP else 0.25
+                reward -= cfg.empty_hard_penalty * empty_scale
+            if retained_hits > 0:
+                reward -= cfg.repeated_hard_penalty * float(
+                    min(retained_hits, 4)
+                )
 
         if cfg.use_cost_overlap_reward:
             step_cost = 0.05 + roi_area_ratio * 0.5
@@ -1061,10 +1195,10 @@ class SliceEnv:
                 not cfg.use_cost_overlap_reward
                 or old_slice_overlap < cfg.old_slice_overlap_threshold
             )
-            if total_target_score > 0.0 and overlap_allows_bonus:
-                quality = min(total_target_score, 4.0)
+            if new_hits > 0 and overlap_allows_bonus:
+                quality = min(target_score, 4.0)
                 reward += cfg.stop_bonus_weight * quality
-            elif observable_score > 0.3:
+            elif len(self.hard_boxes) == 0 and observable_score > 0.3:
                 reward += cfg.stop_bonus_weight * 0.3 * min(observable_score, 2.0)
             else:
                 reward -= cfg.stop_bonus_weight * 0.5

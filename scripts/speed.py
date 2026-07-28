@@ -1,10 +1,3 @@
-"""Measure cold end-to-end latency of the RL-SAHI inference path only.
-
-This deliberately does not run fixed-grid, proposal-SAHI, AP metrics, cache
-reads, or prediction/visualization writes.  Model/checkpoint loading is
-reported separately and excluded from the per-image latency statistics.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -99,10 +92,13 @@ def _build_inference_config(project_cfg, device: str | None, policy_device: str 
         device=device,
         policy_device=policy_device,
         feature_layers=project_cfg.feature_layers("infer"),
+        spatial_feature_layers=project_cfg.spatial_feature_layers("infer"),
         min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
         min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),
         min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
         duplicate_iou=float(infer_cfg.get("duplicate_iou", infer_cfg.get("merge_iou", 0.5))),
+        boundary_margin=float(infer_cfg.get("boundary_margin", 2.0)),
+        append_novel_only=_bool_value(infer_cfg.get("append_novel_only", False)),
         cross_class_duplicate_iou=_optional_float(infer_cfg.get("cross_class_duplicate_iou"), 0.85),
         cross_class_duplicate_ios=_optional_float(infer_cfg.get("cross_class_duplicate_ios"), 0.95),
         max_slice_attempts=int(infer_cfg.get("max_slice_attempts", 0)),

@@ -47,6 +47,53 @@ class RoiPrefilterTest(unittest.TestCase):
     def test_non_positive_topk_keeps_all_candidates(self) -> None:
         self.assertEqual(select_roi_candidates(np.asarray([0.2, 0.1]), topk=0), [0, 1])
 
+    def test_high_confidence_region_is_penalized(self) -> None:
+        det = DetectionCache(
+            image_path="image.jpg",
+            image_shape=(100, 100),
+            boxes=np.asarray(
+                [[10, 10, 30, 30], [70, 70, 80, 80]],
+                dtype=np.float32,
+            ),
+            scores=np.asarray([0.9, 0.25], dtype=np.float32),
+            classes=np.asarray([0, 0], dtype=np.float32),
+            feature=np.zeros((1,), dtype=np.float32),
+            feature_layers=(16,),
+            objectness_map=np.ones((1, 10, 10), dtype=np.float32) * 0.5,
+            spatial_feature_map=np.zeros((4, 10, 10), dtype=np.float32),
+        )
+        rois = [
+            np.asarray([0, 0, 45, 45], dtype=np.float32),
+            np.asarray([55, 55, 100, 100], dtype=np.float32),
+        ]
+
+        scores = score_roi_candidates(
+            det,
+            rois,
+            StateConfig(grid_size=10),
+            (),
+            ClassMapping(),
+            high_conf_penalty=1.0,
+        )
+
+        self.assertGreater(float(scores[1]), float(scores[0]))
+
+    def test_spatial_nms_skips_overlapping_candidate(self) -> None:
+        rois = [
+            np.asarray([0, 0, 50, 50], dtype=np.float32),
+            np.asarray([5, 5, 52, 52], dtype=np.float32),
+            np.asarray([60, 60, 100, 100], dtype=np.float32),
+        ]
+
+        selected = select_roi_candidates(
+            np.asarray([3.0, 2.0, 1.0], dtype=np.float32),
+            topk=2,
+            rois=rois,
+            overlap_threshold=0.35,
+        )
+
+        self.assertEqual(selected, [0, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

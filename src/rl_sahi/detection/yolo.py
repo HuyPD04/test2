@@ -12,11 +12,12 @@ from ultralytics import YOLO
 from rl_sahi.common.cache import DetectionCache
 from rl_sahi.common.data import read_image_shape
 from rl_sahi.common.device import DeviceLike, configure_torch_runtime, configure_ultralytics_for_device
-from rl_sahi.detection.features import DetectAuxCollector, FeatureCollector
+from rl_sahi.detection.features import DetectAuxCollector, FeatureCollector, SpatialFeatureCollector
 
 
 DEFAULT_AUX_GRID_SIZE = 16
 DEFAULT_SPATIAL_FEATURE_CHANNELS = 4
+DEFAULT_SPATIAL_FEATURE_LAYERS = (6,)
 
 
 class _FakeBoxes:
@@ -179,6 +180,7 @@ def detect_one_image(
     max_det: int = 3000,
     device: DeviceLike = None,
     feature_layers: tuple[int, ...] = (10,),
+    spatial_feature_layers: tuple[int, ...] = DEFAULT_SPATIAL_FEATURE_LAYERS,
     aux_grid_size: int = DEFAULT_AUX_GRID_SIZE,
     spatial_feature_channels: int = DEFAULT_SPATIAL_FEATURE_CHANNELS,
     timing: dict[str, float] | None = None,
@@ -194,9 +196,14 @@ def detect_one_image(
         predict_source = source_image
     resolved_device = configure_torch_runtime(device)
     configure_ultralytics_for_device(resolved_device)
-    with FeatureCollector(model, feature_layers) as collector, DetectAuxCollector(model) as aux_collector:
+    with (
+        FeatureCollector(model, feature_layers) as collector,
+        DetectAuxCollector(model) as aux_collector,
+        SpatialFeatureCollector(model, spatial_feature_layers) as spatial_collector,
+    ):
         collector.clear()
         aux_collector.clear()
+        spatial_collector.clear()
         predict_start = time.perf_counter()
         results = model.predict(
             source=predict_source,
@@ -211,7 +218,10 @@ def detect_one_image(
         _add_result_speeds(timing, results)
         feature_start = time.perf_counter()
         feature = collector.vector()
-        objectness_map, spatial_feature_map = aux_collector.maps(
+        objectness_map = aux_collector.objectness_map(
+            grid_size=aux_grid_size,
+        )
+        spatial_feature_map = spatial_collector.maps(
             grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
         )
@@ -237,6 +247,7 @@ def detect_one_image(
         feature_layers=feature_layers,
         objectness_map=objectness_map,
         spatial_feature_map=spatial_feature_map,
+        spatial_feature_layers=spatial_feature_layers,
     )
 
 

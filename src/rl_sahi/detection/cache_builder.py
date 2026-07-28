@@ -9,7 +9,13 @@ from rl_sahi.common.cache import (
     save_detection_cache,
 )
 from rl_sahi.common.data import iter_images
-from rl_sahi.detection.yolo import DEFAULT_AUX_GRID_SIZE, DEFAULT_SPATIAL_FEATURE_CHANNELS, detect_one_image, load_yolo
+from rl_sahi.detection.yolo import (
+    DEFAULT_AUX_GRID_SIZE,
+    DEFAULT_SPATIAL_FEATURE_CHANNELS,
+    DEFAULT_SPATIAL_FEATURE_LAYERS,
+    detect_one_image,
+    load_yolo,
+)
 
 
 def cache_detections_for_split(
@@ -23,6 +29,7 @@ def cache_detections_for_split(
     max_det: int = 3000,
     device: str | None = None,
     feature_layers: tuple[int, ...] = (10,),
+    spatial_feature_layers: tuple[int, ...] = DEFAULT_SPATIAL_FEATURE_LAYERS,
     aux_grid_size: int = DEFAULT_AUX_GRID_SIZE,
     spatial_feature_channels: int = DEFAULT_SPATIAL_FEATURE_CHANNELS,
     limit: int | None = None,
@@ -37,6 +44,7 @@ def cache_detections_for_split(
         iou=iou,
         max_det=max_det,
         feature_layers=feature_layers,
+        spatial_feature_layers=spatial_feature_layers,
         aux_grid_size=aux_grid_size,
         spatial_feature_channels=spatial_feature_channels,
     )
@@ -54,6 +62,7 @@ def cache_detections_for_split(
             max_det=max_det,
             device=device,
             feature_layers=feature_layers,
+            spatial_feature_layers=spatial_feature_layers,
             aux_grid_size=aux_grid_size,
             spatial_feature_channels=spatial_feature_channels,
         )

@@ -17,10 +17,13 @@ class InferenceConfig:
     device: str | None = None
     policy_device: str | None = None
     feature_layers: tuple[int, ...] = (10,)
+    spatial_feature_layers: tuple[int, ...] = (6,)
     min_slice_detections: int = 1
     min_slice_utility: float = 0.5
     min_new_detection_score: float = 0.45
     duplicate_iou: float = 0.5
+    boundary_margin: float = 2.0
+    append_novel_only: bool = False
     cross_class_duplicate_iou: float | None = 0.85
     cross_class_duplicate_ios: float | None = 0.95
     max_slice_attempts: int = 0

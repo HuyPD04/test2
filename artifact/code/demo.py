@@ -141,7 +141,7 @@ def create_info_panel(width: int, height: int, stats: list[tuple[str, str]]) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate 5 RL-SAHI visual outputs from an image link/path.")
-    parser.add_argument("link", nargs="?", default="data/raw/images/val/0000001_02999_d_0000005.jpg",
+    parser.add_argument("link", nargs="?", default="data/raw/images/test/0000011_00234_d_0000001.jpg",
                         help="Path or HTTP/HTTPS URL of the input image")
     parser.add_argument("--out-dir", type=Path, default=Path("artifact/output"),
                         help="Directory to save the generated output images")
@@ -193,6 +193,7 @@ def main() -> None:
             device=infer_cfg.get("device"),
             policy_device=infer_cfg.get("policy_device", infer_cfg.get("device")),
             feature_layers=cfg.feature_layers("infer"),
+            spatial_feature_layers=cfg.spatial_feature_layers("infer"),
             min_slice_detections=int(infer_cfg.get("min_slice_detections", 1)),
             min_slice_utility=float(infer_cfg.get("min_slice_utility", 0.5)),
             min_new_detection_score=float(infer_cfg.get("min_new_detection_score", 0.45)),
@@ -239,6 +240,7 @@ def main() -> None:
         max_det=cfg.section("infer")["max_det"],
         device=cfg.section("infer")["device"],
         feature_layers=cfg.feature_layers("infer"),
+        spatial_feature_layers=cfg.spatial_feature_layers("infer"),
         aux_grid_size=inferencer.state_cfg.grid_size,
         spatial_feature_channels=inferencer.state_cfg.spatial_feature_channels,
         use_cache=False,

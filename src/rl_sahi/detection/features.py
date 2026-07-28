@@ -66,6 +66,64 @@ class DetectAuxCollector(AbstractContextManager["DetectAuxCollector"]):
     def maps(self, grid_size: int, spatial_feature_channels: int) -> tuple[np.ndarray, np.ndarray]:
         return _extract_detect_aux(self.output, grid_size, spatial_feature_channels)
 
+    def objectness_map(self, grid_size: int) -> np.ndarray:
+        objectness_map, _ = _extract_detect_aux(self.output, grid_size, spatial_feature_channels=0)
+        return objectness_map
+
+
+class SpatialFeatureCollector(AbstractContextManager["SpatialFeatureCollector"]):
+    """Collect fixed-width spatial maps from explicitly selected YOLO modules."""
+
+    def __init__(self, yolo: YOLO, layers: Iterable[int]) -> None:
+        self.yolo = yolo
+        self.layers = tuple(int(x) for x in layers)
+        self.handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.features: dict[int, torch.Tensor] = {}
+
+    def __enter__(self) -> "SpatialFeatureCollector":
+        modules = self.yolo.model.model
+        for idx in self.layers:
+            if idx < 0 or idx >= len(modules):
+                raise ValueError(f"Spatial feature layer {idx} is out of range; model has {len(modules)} modules")
+            self.handles.append(modules[idx].register_forward_hook(self._make_hook(idx)))
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+
+    def clear(self) -> None:
+        self.features.clear()
+
+    def _make_hook(self, layer: int):
+        def hook(_module, _inputs, output) -> None:
+            tensor = _first_tensor_output(output)
+            if tensor is not None:
+                self.features[layer] = tensor
+
+        return hook
+
+    def maps(self, grid_size: int, spatial_feature_channels: int) -> np.ndarray:
+        if not self.layers:
+            return np.zeros((0, grid_size, grid_size), dtype=np.float32)
+        missing = [idx for idx in self.layers if idx not in self.features]
+        if missing:
+            raise RuntimeError(f"YOLO spatial feature hooks did not receive output for layers {missing}")
+        maps = [
+            _compress_feature_level(self.features[idx], spatial_feature_channels, grid_size)
+            for idx in self.layers
+        ]
+        return torch.cat(maps, dim=0).numpy().astype(np.float32)
+
+
+def _first_tensor_output(output) -> torch.Tensor | None:
+    if torch.is_tensor(output):
+        return output
+    if isinstance(output, (list, tuple)):
+        return next((item for item in output if torch.is_tensor(item)), None)
+    return None
+
 
 def _summarize_tensor_output(output) -> np.ndarray:
     if isinstance(output, (list, tuple)):

@@ -158,6 +158,57 @@ class SliceEnvRewardTest(unittest.TestCase):
         self.assertGreater(stop.info["total_target_score"], 0.0)
         self.assertGreater(stop.reward, 0.0)
 
+    def test_empty_hard_roi_is_penalized(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            _hard_region_cache(),
+            env_cfg=EnvConfig(empty_hard_penalty=1.5),
+            seed_target=np.asarray([10.0, 10.0], dtype=np.float32),
+        )
+        env.reset()
+
+        result = env.step(Action.STOP)
+
+        self.assertTrue(result.info["empty_hard_roi"])
+        self.assertEqual(result.info["candidate_hits"], 0)
+        self.assertLess(result.reward, -1.5)
+
+    def test_move_toward_new_hard_target_gets_progress_reward(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            _hard_region_cache(),
+            env_cfg=EnvConfig(
+                move_fraction=0.65,
+                context_margin=0.0,
+                hard_coverage_progress_reward=1.0,
+                empty_hard_penalty=0.0,
+            ),
+            seed_target=np.asarray([20.0, 50.0], dtype=np.float32),
+        )
+        env.reset()
+
+        result = env.step(Action.RIGHT)
+
+        self.assertEqual(result.info["candidate_hits"], 1)
+        self.assertGreater(result.info["hard_coverage_progress"], 0.0)
+        self.assertGreater(result.reward, 0.0)
+
+    def test_revisiting_covered_hard_target_is_penalized(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            _hard_region_cache(),
+            env_cfg=EnvConfig(repeated_hard_penalty=1.0),
+            previous_covered=np.asarray([True]),
+            seed_target=np.asarray([50.0, 50.0], dtype=np.float32),
+        )
+        env.reset()
+
+        result = env.step(Action.STOP)
+
+        self.assertEqual(result.info["new_hits"], 0)
+        self.assertEqual(result.info["retained_hits"], 1)
+        self.assertLess(result.reward, -1.0)
+
     def test_non_stop_moves_do_not_commit_hard_coverage(self) -> None:
         env = self.make_env()
         env.reset()
@@ -277,6 +328,33 @@ class SliceEnvRewardTest(unittest.TestCase):
         self.assertGreater(all_result.info["detected_overlap"], 0.0)
         self.assertEqual(target_result.info["detected_overlap"], 0.0)
         self.assertGreater(target_result.reward, all_result.reward)
+
+    def test_detected_overlap_penalty_does_not_vanish_in_crowded_image(self) -> None:
+        boxes = np.asarray(
+            [[40.0, 40.0, 60.0, 60.0]]
+            + [[0.0, 0.0, 5.0, 5.0]] * 12,
+            dtype=np.float32,
+        )
+        detection = DetectionCache(
+            image_path="synthetic.jpg",
+            image_shape=(100, 100),
+            boxes=boxes,
+            scores=np.full((len(boxes),), 0.9, dtype=np.float32),
+            classes=np.zeros((len(boxes),), dtype=np.float32),
+            feature=np.zeros((4,), dtype=np.float32),
+            feature_layers=(10,),
+            objectness_map=np.zeros((1, 16, 16), dtype=np.float32),
+            spatial_feature_map=np.zeros((4, 16, 16), dtype=np.float32),
+        )
+        env = SliceEnv(
+            detection,
+            None,
+            env_cfg=EnvConfig(detected_overlap_count_norm=3.0),
+            seed_target=np.asarray([50.0, 50.0], dtype=np.float32),
+        )
+        env.reset()
+
+        self.assertGreater(env._detected_overlap_score(), 0.3)
 
     def test_torch_box_ops_match_numpy_reward_backend(self) -> None:
         numpy_cfg = EnvConfig(use_gpu_box_ops=False)

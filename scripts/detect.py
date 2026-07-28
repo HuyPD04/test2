@@ -37,6 +37,7 @@ def main() -> None:
         max_det=int(detect_cfg["max_det"]),
         device=device,
         feature_layers=cfg.feature_layers("detect"),
+        spatial_feature_layers=cfg.spatial_feature_layers("detect"),
         aux_grid_size=int(state_cfg["grid_size"]),
         spatial_feature_channels=int(state_cfg.get("spatial_feature_channels", 4)),
         limit=args.limit,
