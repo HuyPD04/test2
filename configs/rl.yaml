@@ -16,7 +16,7 @@ state:
 env:
   max_steps: 5
   max_slices: 4
-  initial_slice_fraction: 0.28
+  initial_slice_fraction: 0.25
   move_fraction: 0.65
   zoom_factor: 0.75
   min_slice_fraction: 0.10
