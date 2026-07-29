@@ -97,7 +97,7 @@ def benchmark_sahi_folder(folder_path: str, model_path: str, output_dir: str, ex
 
 if __name__ == "__main__":
     FOLDER_PATH = r"data\raw\images\test"
-    MODEL_PATH = "yolo11l.pt"  
+    MODEL_PATH = "yolo11m.pt"  
     OUTPUT_DIR = r"benchmark_official\results\test"
 
     benchmark_sahi_folder(FOLDER_PATH, MODEL_PATH, OUTPUT_DIR, ext="*.jpg")

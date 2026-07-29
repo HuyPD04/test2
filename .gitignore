@@ -29,6 +29,4 @@ yolov5l-xs-11.pt
 
 benchmark_official/
 tmp/
-best.pt
-best_crop.pt
-last_crop.pt
+runs/weight/
