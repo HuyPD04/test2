@@ -1,0 +1,8 @@
+includes:
+  - full.yaml
+
+paths:
+  dqn_out_dir: runs/dqn_ablation/no_hard_region_reward
+
+env:
+  use_hard_region_reward: false

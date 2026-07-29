@@ -98,7 +98,14 @@ class SliceEnv:
         self.state_small_mask = static.state_small_mask
         self.state_low_mask = static.state_low_mask
 
-        self.hard_boxes = as_boxes(hard_regions.hard_boxes if hard_regions is not None else np.zeros((0, 4)))
+        # Keep the cache available to the training dataset, but remove all
+        # hard-region supervision from this environment for its ablation.
+        hard_boxes = (
+            hard_regions.hard_boxes
+            if self.env_cfg.use_hard_region_reward and hard_regions is not None
+            else np.zeros((0, 4), dtype=np.float32)
+        )
+        self.hard_boxes = as_boxes(hard_boxes)
         self.previous_rois = as_boxes(previous_rois if previous_rois is not None else np.zeros((0, 4), dtype=np.float32))
         self.overlap_rois = as_boxes(overlap_rois if overlap_rois is not None else self.previous_rois)
         self.box_device = self._resolve_box_device()

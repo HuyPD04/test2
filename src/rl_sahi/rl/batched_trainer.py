@@ -275,7 +275,8 @@ def _greedy_eval_episode(
     class_mapping: ClassMapping | None = None,
 ) -> tuple[int, int, int]:
     attempted_rois: list[np.ndarray] = []
-    previous_covered = np.zeros((len(as_boxes(hard.hard_boxes)),), dtype=bool)
+    hard_count = len(as_boxes(hard.hard_boxes)) if env_cfg.use_hard_region_reward else 0
+    previous_covered = np.zeros((hard_count,), dtype=bool)
     selected_slices = 0
     max_attempts = _max_slice_attempts(env_cfg, None)
     for _attempt_idx in range(max_attempts):
@@ -753,6 +754,10 @@ def batched_train_dqn(
                 resume_data.get("train_cfg", {}).get("use_crop_outcome_reward", True),
                 cfg.use_crop_outcome_reward,
             ),
+            "env.use_hard_region_reward": (
+                resume_data.get("env_cfg", {}).get("use_hard_region_reward", True),
+                env_cfg.use_hard_region_reward,
+            ),
             "env.use_cost_overlap_reward": (
                 resume_data.get("env_cfg", {}).get("use_cost_overlap_reward", True),
                 env_cfg.use_cost_overlap_reward,
@@ -809,7 +814,8 @@ def batched_train_dqn(
         if cfg.use_curriculum:
             curriculum_frac = min(float(global_step) / max(cfg.curriculum_steps, 1), 1.0)
             current_max_slices = max(1, int(env_cfg.max_slices * curriculum_frac))
-        previous_covered = np.zeros((len(as_boxes(hard.hard_boxes)),), dtype=bool)
+        hard_count = len(as_boxes(hard.hard_boxes)) if env_cfg.use_hard_region_reward else 0
+        previous_covered = np.zeros((hard_count,), dtype=bool)
         if crop_evaluator is not None:
             full_boxes, full_scores, full_classes = crop_evaluator.full_predictions(det)
             accepted_new_count = crop_evaluator.initial_new_count(

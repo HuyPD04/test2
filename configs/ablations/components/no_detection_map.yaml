@@ -1,0 +1,8 @@
+includes:
+  - full.yaml
+
+paths:
+  dqn_out_dir: runs/dqn_ablation/no_detection_map
+
+state:
+  use_detector_cues: false

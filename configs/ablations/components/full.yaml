@@ -1,0 +1,8 @@
+includes:
+  - ../../default.yaml
+
+paths:
+  dqn_out_dir: runs/dqn_ablation/full
+
+train:
+  resume: false

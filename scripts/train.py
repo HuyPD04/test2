@@ -76,6 +76,12 @@ def main() -> None:
         help="Enable terminal reward from actual crop detector outcomes (default: config, enabled).",
     )
     parser.add_argument(
+        "--hard-region-reward",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable hard-region target reward and coverage supervision (default: config, enabled).",
+    )
+    parser.add_argument(
         "--cost-overlap",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -101,6 +107,8 @@ def main() -> None:
         state_cfg.use_history = bool(args.history)
     if args.outcome_reward is not None:
         train_cfg.use_crop_outcome_reward = bool(args.outcome_reward)
+    if args.hard_region_reward is not None:
+        env_cfg.use_hard_region_reward = bool(args.hard_region_reward)
     if args.cost_overlap is not None:
         env_cfg.use_cost_overlap_reward = bool(args.cost_overlap)
     if args.action_mask is not None:
@@ -140,6 +148,7 @@ def main() -> None:
         f"detector_cues={state_cfg.use_detector_cues} "
         f"history={state_cfg.use_history} "
         f"outcome_reward={train_cfg.use_crop_outcome_reward} "
+        f"hard_region_reward={env_cfg.use_hard_region_reward} "
         f"cost_overlap={env_cfg.use_cost_overlap_reward} "
         f"action_mask={env_cfg.use_action_mask}"
     )

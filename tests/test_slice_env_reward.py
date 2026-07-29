@@ -130,6 +130,22 @@ class SliceEnvRewardTest(unittest.TestCase):
 
         self.assertEqual(result.reward, 0.0)
 
+    def test_no_hard_region_reward_removes_hard_target_supervision(self) -> None:
+        env = SliceEnv(
+            _detection_cache(),
+            _hard_region_cache(),
+            env_cfg=EnvConfig(use_hard_region_reward=False),
+            previous_covered=np.asarray([True]),
+        )
+        env.reset()
+
+        result = env.step(Action.STOP)
+
+        self.assertEqual(len(env.hard_boxes), 0)
+        self.assertEqual(result.info["hard_total"], 0)
+        self.assertEqual(result.info["new_hits"], 0)
+        self.assertEqual(result.info["candidate_hits"], 0)
+
     def test_no_action_mask_exposes_every_action_to_policy(self) -> None:
         env = SliceEnv(
             _detection_cache(),

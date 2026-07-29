@@ -17,32 +17,17 @@ class Variant:
     key: str
     label: str
     checkpoint: Path
-    spatial: bool
     detection: bool
     history: bool
-    outcome: bool
+    hard_region_reward: bool
     cost_overlap: bool
-    action_mask: bool
 
 
 VARIANTS = (
     Variant(
         "full",
         "Full RL-SAHI",
-        Path("runs/dqn/best.pt"),
-        True,
-        True,
-        True,
-        True,
-        True,
-        True,
-    ),
-    Variant(
-        "no_spatial",
-        "w/o spatial feature",
-        Path("runs/dqn_ablation/no_spatial/best.pt"),
-        False,
-        True,
+        Path("runs/dqn_ablation/full/best.pt"),
         True,
         True,
         True,
@@ -52,9 +37,7 @@ VARIANTS = (
         "no_detection_map",
         "w/o detection map",
         Path("runs/dqn_ablation/no_detection_map/best.pt"),
-        True,
         False,
-        True,
         True,
         True,
         True,
@@ -64,40 +47,23 @@ VARIANTS = (
         "w/o history",
         Path("runs/dqn_ablation/no_history/best.pt"),
         True,
-        True,
         False,
-        True,
         True,
         True,
     ),
     Variant(
-        "no_outcome_reward",
-        "w/o outcome reward",
-        Path("runs/dqn_ablation/no_outcome_reward/best.pt"),
-        True,
+        "no_hard_region_reward",
+        "w/o hard-region target reward",
+        Path("runs/dqn_ablation/no_hard_region_reward/best.pt"),
         True,
         True,
         False,
-        True,
         True,
     ),
     Variant(
         "no_cost_overlap",
         "w/o cost/overlap",
         Path("runs/dqn_ablation/no_cost_overlap/best.pt"),
-        True,
-        True,
-        True,
-        True,
-        False,
-        True,
-    ),
-    Variant(
-        "no_action_mask",
-        "w/o action mask",
-        Path("runs/dqn_ablation/no_action_mask/best.pt"),
-        True,
-        True,
         True,
         True,
         True,
@@ -186,8 +152,8 @@ def build_table(input_dir: Path) -> str:
     lines.extend(
         [
             "",
-            "| Variant | Spatial feature | Detection map | History | Outcome reward | Cost/overlap | Action mask | AP | Delta AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Detection map | History map | Hard-region target reward | Cost/overlap penalty | AP | Delta AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     reference_ap = None if full is None else full.get("AP")
@@ -195,15 +161,14 @@ def build_table(input_dir: Path) -> str:
         row = _load_result(input_dir / variant.key / "benchmark.json", "rl_sahi")
         if row is None:
             lines.append(
-                f"| {variant.label} | {_yn(variant.spatial)} | {_yn(variant.detection)} | "
-                f"{_yn(variant.history)} | {_yn(variant.outcome)} | "
-                f"{_yn(variant.cost_overlap)} | {_yn(variant.action_mask)} | - | - | - | - | - | - | - | - |"
+                f"| {variant.label} | {_yn(variant.detection)} | {_yn(variant.history)} | "
+                f"{_yn(variant.hard_region_reward)} | {_yn(variant.cost_overlap)} | "
+                "- | - | - | - | - | - | - | - |"
             )
             continue
         lines.append(
-            f"| {variant.label} | {_yn(variant.spatial)} | {_yn(variant.detection)} | "
-            f"{_yn(variant.history)} | {_yn(variant.outcome)} | "
-            f"{_yn(variant.cost_overlap)} | {_yn(variant.action_mask)} | "
+            f"| {variant.label} | {_yn(variant.detection)} | {_yn(variant.history)} | "
+            f"{_yn(variant.hard_region_reward)} | {_yn(variant.cost_overlap)} | "
             f"{_pct(row.get('AP'))} | {_delta(row.get('AP'), reference_ap)} | "
             f"{_pct(row.get('AP50'))} | {_pct(row.get('AP75'))} | "
             f"{_pct(row.get('small_recall'))} | {_num(row.get('fp_per_image'))} | "
