@@ -25,15 +25,6 @@ class Variant:
 
 VARIANTS = (
     Variant(
-        "full",
-        "Full RL-SAHI",
-        Path("runs/dqn_ablation/full/best.pt"),
-        True,
-        True,
-        True,
-        True,
-    ),
-    Variant(
         "no_detection_map",
         "w/o detection map",
         Path("runs/dqn_ablation/no_detection_map/best.pt"),
@@ -96,12 +87,6 @@ def _pct(value: Any) -> str:
     return "-" if value is None else f"{100.0 * float(value):.2f}"
 
 
-def _delta(value: Any, reference: Any) -> str:
-    if value is None or reference is None:
-        return "-"
-    return f"{100.0 * (float(value) - float(reference)):+.2f}"
-
-
 def _num(value: Any, digits: int = 2) -> str:
     return "-" if value is None else f"{float(value):.{digits}f}"
 
@@ -111,8 +96,6 @@ def _yn(value: bool) -> str:
 
 
 def build_table(input_dir: Path) -> str:
-    full = _load_result(input_dir / "full" / "benchmark.json", "rl_sahi")
-    yolo = _load_result(input_dir / "full" / "benchmark.json", "yolo_full")
     manifests = [
         _load_manifest(input_dir / variant.key / "benchmark.json")
         for variant in VARIANTS
@@ -140,37 +123,30 @@ def build_table(input_dir: Path) -> str:
         "",
         "Each row uses the same detector, validation split, inference thresholds, crop "
         "acceptance settings, and evaluator. Only the DQN checkpoint changes.",
+        "The full RL-SAHI baseline is benchmarked separately and is not included here.",
         "",
         f"Device: `{device_note}`. Checkpoint file name(s): `{checkpoint_note}`.",
     ]
-    if yolo is not None:
-        lines.append(
-            f"YOLO full-image reference: AP={_pct(yolo.get('AP'))}, "
-            f"AP50={_pct(yolo.get('AP50'))}, "
-            f"Recall-small@0.50={_pct(yolo.get('small_recall'))}."
-        )
     lines.extend(
         [
             "",
-            "| Variant | Detection map | History map | Hard-region target reward | Cost/overlap penalty | AP | Delta AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Detection map | History map | Hard-region target reward | Cost/overlap penalty | AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
-    reference_ap = None if full is None else full.get("AP")
     for variant in VARIANTS:
         row = _load_result(input_dir / variant.key / "benchmark.json", "rl_sahi")
         if row is None:
             lines.append(
                 f"| {variant.label} | {_yn(variant.detection)} | {_yn(variant.history)} | "
                 f"{_yn(variant.hard_region_reward)} | {_yn(variant.cost_overlap)} | "
-                "- | - | - | - | - | - | - | - |"
+                "- | - | - | - | - | - | - |"
             )
             continue
         lines.append(
             f"| {variant.label} | {_yn(variant.detection)} | {_yn(variant.history)} | "
             f"{_yn(variant.hard_region_reward)} | {_yn(variant.cost_overlap)} | "
-            f"{_pct(row.get('AP'))} | {_delta(row.get('AP'), reference_ap)} | "
-            f"{_pct(row.get('AP50'))} | {_pct(row.get('AP75'))} | "
+            f"{_pct(row.get('AP'))} | {_pct(row.get('AP50'))} | {_pct(row.get('AP75'))} | "
             f"{_pct(row.get('small_recall'))} | {_num(row.get('fp_per_image'))} | "
             f"{_num(row.get('crops_per_image'))} | {_num(row.get('images_per_second'))} |"
         )
