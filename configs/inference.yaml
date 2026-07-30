@@ -36,7 +36,7 @@ infer:
 
 benchmark:
   output_conf: 0.01
-  iou_threshold: 0.5
+  iou_threshold: 0.45
   eval_max_detections: 500
   ignore_overlap_threshold: 0.5
   fixed_slice_fraction: 0.35
