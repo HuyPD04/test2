@@ -118,6 +118,17 @@ class SliceEnvRewardTest(unittest.TestCase):
         self.assertTrue(np.all(summary[24:28] == 0.0))
         self.assertTrue(np.all(summary[[18, 20, 21, 23]] == 0.0))
 
+    def test_lazy_reset_matches_the_eager_initial_state(self) -> None:
+        eager = SliceEnv(_nonzero_state_detection_cache(), None)
+        lazy = SliceEnv(_nonzero_state_detection_cache(), None, lazy_reset=True)
+
+        eager_state = eager.reset()
+        lazy_state = lazy.reset()
+
+        np.testing.assert_array_equal(lazy_state, eager_state)
+        np.testing.assert_array_equal(lazy.roi, eager.roi)
+        np.testing.assert_array_equal(lazy.valid_actions(), eager.valid_actions())
+
     def test_no_cost_overlap_disables_step_cost_reward(self) -> None:
         env = SliceEnv(
             _detection_cache(),

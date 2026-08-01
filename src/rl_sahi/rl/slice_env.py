@@ -61,6 +61,7 @@ class SliceEnv:
         static_context: SliceEnvStaticContext | None = None,
         seed_rank: int = 0,
         seed_target: np.ndarray | None = None,
+        lazy_reset: bool = False,
     ) -> None:
         self.detection = detection
         self.hard_regions = hard_regions
@@ -119,10 +120,16 @@ class SliceEnv:
         self.previous_covered = self._init_previous_covered(previous_covered)
         self.history = np.zeros((self.state_cfg.grid_size, self.state_cfg.grid_size), dtype=np.float32)
         self.covered = self.previous_covered.copy()
-        self.roi = self._initial_roi()
         self.step_index = 0
         self._state_buffer = None
-        self._state_buffer = self._state()
+        # Inference creates a fresh environment and immediately calls reset().
+        # Defer the initial ROI/state in that case so this work is not performed
+        # twice; the default retains the historical ready-to-use constructor.
+        if lazy_reset:
+            self.roi = np.zeros((4,), dtype=np.float32)
+        else:
+            self.roi = self._initial_roi()
+            self._state_buffer = self._state()
 
     @staticmethod
     def build_static_context(

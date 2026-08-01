@@ -452,6 +452,7 @@ def _collect_parts(
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
                 seed_rank=attempt_idx - 1,
+                lazy_reset=True,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
             repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)
@@ -524,6 +525,7 @@ def _collect_parts(
                     class_mapping=cfg.class_mapping,
                     static_context=env_static,
                     seed_rank=attempt_idx - 1,
+                    lazy_reset=True,
                 )
                 roi, _actions, info = rollout_one_slice(policy, env, device_t)
                 repeat_attempt_overlap = _attempt_overlap(roi, attempted_rois)

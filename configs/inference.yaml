@@ -25,7 +25,6 @@ infer:
   save_visualization: false
   batched_inference: true
   use_wbf: false
-  # Fast class-wise IoU-NMS for ROI acceptance; final image merge remains CDN-NMS.
   gate_nms_type: "standard"
   nms_type: "cdn"
   device: "cuda"

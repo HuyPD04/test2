@@ -862,6 +862,7 @@ def _infer_with_loaded(
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
                 seed_rank=attempt_idx - 1,
+                lazy_reset=True,
             )
             timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
             roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
@@ -1113,6 +1114,7 @@ def _infer_with_loaded(
                     class_mapping=cfg.class_mapping,
                     static_context=env_static,
                     seed_rank=attempt_idx - 1,
+                    lazy_reset=True,
                 )
                 timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
                 roi, actions, info = rollout_one_slice(policy, env, device_t, timing=timing)
