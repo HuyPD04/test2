@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.common.cache import DetectionCache
+from rl_sahi.eval import benchmark as benchmark_module
 from rl_sahi.eval.benchmark import _predict_rl_sahi
 from rl_sahi.inference.config import InferenceConfig
 from rl_sahi.rl.env_config import EnvConfig
@@ -125,6 +126,58 @@ class BenchmarkBatchInferenceTest(unittest.TestCase):
         self.assertEqual(inferred, 1)
         self.assertEqual(accepted, 0)
         self.assertEqual(len(boxes), 0)
+
+    def test_fast_gate_keeps_cdn_for_the_final_merge(self) -> None:
+        det = DetectionCache(
+            image_path="image.jpg",
+            image_shape=(100, 100),
+            boxes=np.zeros((0, 4), dtype=np.float32),
+            scores=np.zeros((0,), dtype=np.float32),
+            classes=np.zeros((0,), dtype=np.float32),
+            feature=np.zeros((1,), dtype=np.float32),
+            feature_layers=(16,),
+            objectness_map=np.zeros((16, 16), dtype=np.float32),
+            spatial_feature_map=np.zeros((4, 16, 16), dtype=np.float32),
+        )
+        roi = np.asarray([10, 10, 50, 50], dtype=np.float32)
+        prediction = (
+            np.asarray([[20, 20, 30, 30]], dtype=np.float32),
+            np.asarray([0.9], dtype=np.float32),
+            np.asarray([0.0], dtype=np.float32),
+        )
+        shared_model = object()
+        with (
+            patch("rl_sahi.eval.benchmark.SliceEnv", return_value=object()),
+            patch("rl_sahi.eval.benchmark.rollout_one_slice", return_value=(roi, ["stop"], {})),
+            patch("rl_sahi.eval.benchmark.run_yolo_on_crops", return_value=[prediction]),
+            patch("rl_sahi.eval.benchmark._new_detection_stats", return_value=(1, 0.9, 0.9)) as gate_stats,
+            patch(
+                "rl_sahi.eval.benchmark._merge_predictions",
+                wraps=benchmark_module._merge_predictions,
+            ) as final_merge,
+        ):
+            _predict_rl_sahi(
+                model=shared_model,
+                full_model=shared_model,
+                crop_model=object(),
+                policy=object(),
+                device_t=object(),
+                image_path=Path("image.jpg"),
+                det=det,
+                cfg=InferenceConfig(
+                    batched_inference=True,
+                    max_slice_attempts=1,
+                    target_classes=(),
+                    boundary_margin=0.0,
+                    nms_type="cdn",
+                    gate_nms_type="standard",
+                ),
+                env_cfg=EnvConfig(max_slices=1),
+                state_cfg=StateConfig(),
+            )
+
+        self.assertEqual(gate_stats.call_args.kwargs["nms_type"], "standard")
+        self.assertEqual(final_merge.call_args.kwargs["nms_type"], "cdn")
 
 
 if __name__ == "__main__":

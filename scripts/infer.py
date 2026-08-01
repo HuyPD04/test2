@@ -137,6 +137,7 @@ def main() -> None:
             batched_inference=_bool_value(infer_cfg.get("batched_inference", False)),
             use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
             nms_type=str(infer_cfg.get("nms_type", "standard")) if args.nms_type is None else str(args.nms_type),
+            gate_nms_type=str(infer_cfg.get("gate_nms_type", "standard")),
             class_mapping=ClassMapping.from_config(cfg.section("classes")),
         ),
     )

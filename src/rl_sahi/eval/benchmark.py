@@ -653,7 +653,7 @@ def _predict_from_crop_predictions(
                 cfg.cross_class_duplicate_iou,
                 cfg.cross_class_duplicate_ios,
                 use_wbf=cfg.use_wbf,
-                nms_type=cfg.nms_type,
+                nms_type=cfg.gate_nms_type,
             )
             if _crop_rejection_reason(len(boxes_i), gain, utility, max_score, cfg) is not None:
                 continue
@@ -715,6 +715,7 @@ def _predict_rl_sahi(
     state_cfg: StateConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     env_cfg = replace(env_cfg, use_gpu_box_ops=False)
+    gate_cfg = replace(cfg, nms_type=str(cfg.gate_nms_type))
     env_static = SliceEnv.build_static_context(
         det,
         state_cfg,
@@ -833,7 +834,7 @@ def _predict_rl_sahi(
                         cfg.cross_class_duplicate_iou,
                         cfg.cross_class_duplicate_ios,
                         use_wbf=cfg.use_wbf,
-                        nms_type=cfg.nms_type,
+                        nms_type=gate_cfg.nms_type,
                         slice_reliability_parts=slice_reliability_all,
                         candidate_reliability=reliability_i,
                     )
@@ -862,7 +863,7 @@ def _predict_rl_sahi(
                     roi,
                     det.image_shape,
                     info,
-                    cfg,
+                    gate_cfg,
                 )
                 slice_boxes_all.append(boxes_i)
                 slice_scores_all.append(scores_i)
@@ -980,7 +981,7 @@ def _predict_rl_sahi(
                 cfg.cross_class_duplicate_iou,
                 cfg.cross_class_duplicate_ios,
                 use_wbf=cfg.use_wbf,
-                nms_type=cfg.nms_type,
+                nms_type=gate_cfg.nms_type,
                 slice_reliability_parts=slice_reliability_all,
                 candidate_reliability=reliability_i,
             )
@@ -1010,7 +1011,7 @@ def _predict_rl_sahi(
                 roi,
                 det.image_shape,
                 info,
-                cfg,
+                gate_cfg,
             )
             slice_boxes_all.append(boxes_i)
             slice_scores_all.append(scores_i)

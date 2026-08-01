@@ -831,6 +831,7 @@ def _infer_with_loaded(
     roi_prefilter_dropped = 0
     global_stop_reason: str | None = None
     merged_previous_cache: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+    gate_cfg = replace(cfg, nms_type=str(cfg.gate_nms_type))
 
     if cfg.batched_inference:
         # ── BATCHED MODE: 3-phase pipeline ──────────────────────────
@@ -991,7 +992,7 @@ def _infer_with_loaded(
                         cfg.cross_class_duplicate_iou,
                         cfg.cross_class_duplicate_ios,
                         cfg.use_wbf,
-                        cfg.nms_type,
+                        gate_cfg.nms_type,
                     )
                 (
                     novel_boxes_i,
@@ -1013,7 +1014,7 @@ def _infer_with_loaded(
                     classes_i,
                     reliability_i,
                     det.image_shape,
-                    cfg,
+                    gate_cfg,
                     merged_previous_cache,
                 )
                 timing["candidate_evaluation_ms"] += (time.perf_counter() - candidate_evaluation_start) * 1000.0
@@ -1201,7 +1202,7 @@ def _infer_with_loaded(
                         cfg.cross_class_duplicate_iou,
                         cfg.cross_class_duplicate_ios,
                         cfg.use_wbf,
-                        cfg.nms_type,
+                        gate_cfg.nms_type,
                     )
                 (
                     novel_boxes_i,
@@ -1223,7 +1224,7 @@ def _infer_with_loaded(
                     classes_i,
                     reliability_i,
                     det.image_shape,
-                    cfg,
+                    gate_cfg,
                     merged_previous_cache,
                 )
                 timing["candidate_evaluation_ms"] += (
@@ -1340,6 +1341,8 @@ def _infer_with_loaded(
         "num_crop_batches": crop_batch_count,
         "num_roi_candidates": roi_candidate_count,
         "num_roi_prefilter_dropped": roi_prefilter_dropped,
+        "gate_nms_type": gate_cfg.nms_type,
+        "final_nms_type": cfg.nms_type,
         "slices": slice_meta,
         "detections": int(len(boxes)),
         "prediction_file": str(pred_path) if cfg.save_predictions else None,
@@ -1566,6 +1569,7 @@ def infer_one_image(
         ),
         use_wbf=_bool_value(infer_cfg.get("use_wbf", False)),
         nms_type=str(infer_cfg.get("nms_type", "standard")),
+        gate_nms_type=str(infer_cfg.get("gate_nms_type", "standard")),
         class_mapping=class_mapping or ClassMapping.from_config(project_cfg.section("classes")),
     )
     inferencer = AdaptiveSahiInferencer(weights=weights, checkpoint=checkpoint, cfg=cfg)

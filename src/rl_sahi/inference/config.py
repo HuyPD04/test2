@@ -39,4 +39,5 @@ class InferenceConfig:
     batched_inference: bool = False
     use_wbf: bool = False
     nms_type: str = "standard"  # standard | diou | cdn | source_aware_<type> | reliability_aware_<type>
+    gate_nms_type: str = "standard"  # Fast ROI-acceptance NMS; final merge still uses nms_type.
     class_mapping: ClassMapping = field(default_factory=ClassMapping)

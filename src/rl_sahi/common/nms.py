@@ -32,6 +32,29 @@ def nms_numpy(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float, nms_t
     return keep_t.cpu().numpy().astype(np.int64)
 
 
+def batched_nms_numpy(
+    boxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    iou_threshold: float,
+) -> np.ndarray:
+    """Run standard class-wise IoU-NMS in one torchvision batched-NMS call."""
+    boxes = as_boxes(boxes)
+    scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+    classes = np.asarray(classes, dtype=np.float32).reshape(-1)
+    if len(boxes) == 0:
+        return np.zeros((0,), dtype=np.int64)
+    if not (len(boxes) == len(scores) == len(classes)):
+        raise ValueError("boxes, scores, and classes must have the same length")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    boxes_t = torch.as_tensor(boxes, dtype=torch.float32, device=device)
+    scores_t = torch.as_tensor(scores, dtype=torch.float32, device=device)
+    classes_t = torch.as_tensor(classes, dtype=torch.int64, device=device)
+    keep_t = torchvision.ops.batched_nms(boxes_t, scores_t, classes_t, iou_threshold)
+    return keep_t.cpu().numpy().astype(np.int64)
+
+
 def _diou_nms_pytorch(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
     """Distance-IoU NMS implementation."""
     x1 = boxes[:, 0]

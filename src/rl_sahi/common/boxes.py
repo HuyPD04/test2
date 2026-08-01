@@ -12,7 +12,7 @@ from rl_sahi.common.box_geometry import (
 )
 from rl_sahi.common.box_transforms import box_from_center, clip_boxes, translate_box, xywhn_to_xyxy, xyxy_to_xywhn, zoom_box
 from rl_sahi.common.box_types import EPS, as_boxes
-from rl_sahi.common.nms import nms_numpy
+from rl_sahi.common.nms import batched_nms_numpy, nms_numpy
 from rl_sahi.common.raster import rasterize_boxes
 
 
@@ -20,6 +20,7 @@ __all__ = [
     "EPS",
     "area",
     "as_boxes",
+    "batched_nms_numpy",
     "box_from_center",
     "center_inside",
     "centers",

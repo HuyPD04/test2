@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rl_sahi.common.boxes import as_boxes, clip_boxes, iou_matrix, nms_numpy
+from rl_sahi.common.boxes import as_boxes, batched_nms_numpy, clip_boxes, iou_matrix, nms_numpy
 from rl_sahi.common.wbf import weighted_box_fusion
 
 
@@ -103,6 +103,8 @@ def class_aware_nms(
     if len(boxes) == 0:
         return np.zeros((0,), dtype=np.int64)
     _priority_mode, base_nms_type = _split_nms_type(nms_type)
+    if base_nms_type == "standard":
+        return batched_nms_numpy(boxes, scores, classes, iou_threshold)
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
         idx = np.flatnonzero(classes.astype(np.int64) == cls)
@@ -137,6 +139,16 @@ def class_aware_nms_with_sources(
     priority_mode, base_nms_type = _split_nms_type(nms_type)
     if priority_mode == "none":
         return class_aware_nms(boxes, scores, classes, iou_threshold, nms_type=base_nms_type)
+
+    if base_nms_type == "standard":
+        if priority_mode == "source":
+            priority_scores = _source_priority_scores(scores, sources)
+        elif priority_mode == "reliability":
+            priority_scores = _reliability_priority_scores(scores, reliabilities)
+        else:
+            raise ValueError(f"Unsupported NMS priority mode: {priority_mode!r}")
+        keep = batched_nms_numpy(boxes, priority_scores, classes, iou_threshold)
+        return keep[np.argsort(scores[keep])[::-1]].astype(np.int64)
 
     keep_parts: list[np.ndarray] = []
     for cls in np.unique(classes.astype(np.int64)):
