@@ -145,6 +145,53 @@ class MergeGainTest(unittest.TestCase):
         )
         self.assertTrue(accepts_novel_detections(gain, utility, max_score, 1, 0.8, 0.45))
 
+    def test_premerged_previous_predictions_preserve_candidate_stats(self) -> None:
+        previous_boxes_parts = [
+            np.array([[10.0, 10.0, 30.0, 30.0]], dtype=np.float32),
+            np.array([[60.0, 60.0, 80.0, 80.0]], dtype=np.float32),
+        ]
+        previous_scores_parts = [
+            np.array([0.9], dtype=np.float32),
+            np.array([0.8], dtype=np.float32),
+        ]
+        previous_classes_parts = [
+            np.array([0.0], dtype=np.float32),
+            np.array([0.0], dtype=np.float32),
+        ]
+        kwargs = {
+            "image_shape": (100, 100),
+            "merge_iou": 0.5,
+            "previous_boxes_parts": previous_boxes_parts,
+            "previous_scores_parts": previous_scores_parts,
+            "previous_classes_parts": previous_classes_parts,
+            "candidate_boxes": np.array(
+                [[10.0, 10.0, 30.0, 30.0], [35.0, 35.0, 50.0, 50.0]],
+                dtype=np.float32,
+            ),
+            "candidate_scores": np.array([0.95, 0.7], dtype=np.float32),
+            "candidate_classes": np.array([0.0, 0.0], dtype=np.float32),
+            "cross_class_duplicate_iou": None,
+            "cross_class_duplicate_ios": None,
+            "nms_type": "cdn",
+        }
+        merged_previous = merge_predictions(
+            kwargs["image_shape"],
+            kwargs["merge_iou"],
+            previous_boxes_parts,
+            previous_scores_parts,
+            previous_classes_parts,
+            cross_class_duplicate_iou=None,
+            cross_class_duplicate_ios=None,
+            nms_type="cdn",
+        )
+
+        uncached = new_detection_stats_after_merge(**kwargs)
+        cached = new_detection_stats_after_merge(**kwargs, merged_previous=merged_previous)
+
+        self.assertEqual(cached[0], uncached[0])
+        self.assertAlmostEqual(cached[1], uncached[1], places=6)
+        self.assertAlmostEqual(cached[2], uncached[2], places=6)
+
     def test_multiple_weak_detections_do_not_pass_score_gate(self) -> None:
         self.assertFalse(accepts_novel_detections(2, 0.8, 0.4, 1, 0.8, 0.45))
 

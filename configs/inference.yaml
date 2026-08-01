@@ -1,5 +1,5 @@
 infer:
-  full_imgsz: 896
+  full_imgsz: 1536
   slice_imgsz: 512
   full_conf: 0.01
   output_conf: 0.3

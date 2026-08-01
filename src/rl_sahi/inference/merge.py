@@ -376,19 +376,30 @@ def _novel_candidate_detections_after_merge(
     nms_type: str = "standard",
     previous_reliability_parts: list[np.ndarray] | None = None,
     candidate_reliability: np.ndarray | None = None,
+    merged_previous: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    before_boxes, _before_scores, before_classes = merge_predictions(
-        image_shape,
-        merge_iou,
-        previous_boxes_parts,
-        previous_scores_parts,
-        previous_classes_parts,
-        use_wbf=use_wbf,
-        nms_type=nms_type,
-        cross_class_duplicate_iou=cross_class_duplicate_iou,
-        cross_class_duplicate_ios=cross_class_duplicate_ios,
-        reliability_parts=previous_reliability_parts,
-    )
+    """Return detections contributed by a candidate after the configured merge.
+
+    ``merged_previous`` is an optional cached result of merging the previous
+    prediction parts with identical merge settings.  It avoids repeating the
+    expensive pre-candidate NMS while preserving the acceptance semantics.
+    Callers must invalidate that cache whenever a prediction part is added.
+    """
+    if merged_previous is None:
+        before_boxes, _before_scores, before_classes = merge_predictions(
+            image_shape,
+            merge_iou,
+            previous_boxes_parts,
+            previous_scores_parts,
+            previous_classes_parts,
+            use_wbf=use_wbf,
+            nms_type=nms_type,
+            cross_class_duplicate_iou=cross_class_duplicate_iou,
+            cross_class_duplicate_ios=cross_class_duplicate_ios,
+            reliability_parts=previous_reliability_parts,
+        )
+    else:
+        before_boxes, _before_scores, before_classes = merged_previous
     candidate_boxes = np.asarray(candidate_boxes, dtype=np.float32).reshape(-1, 4)
     candidate_scores = np.asarray(candidate_scores, dtype=np.float32).reshape(-1)
     candidate_classes = np.asarray(candidate_classes, dtype=np.float32).reshape(-1)
@@ -543,6 +554,7 @@ def new_detection_stats_after_merge(
     nms_type: str = "standard",
     previous_reliability_parts: list[np.ndarray] | None = None,
     candidate_reliability: np.ndarray | None = None,
+    merged_previous: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> tuple[int, float, float]:
     boxes, scores, _classes = _novel_candidate_detections_after_merge(
         image_shape,
@@ -560,6 +572,7 @@ def new_detection_stats_after_merge(
         nms_type=nms_type,
         previous_reliability_parts=previous_reliability_parts,
         candidate_reliability=candidate_reliability,
+        merged_previous=merged_previous,
     )
     if len(boxes) == 0:
         return 0, 0.0, 0.0

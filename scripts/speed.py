@@ -41,6 +41,7 @@ TIMING_KEYS = (
     "rollout_policy_ms",
     "rollout_step_ms",
     "roi_prefilter_ms",
+    "candidate_evaluation_ms",
     "crop_inference_ms",
     "crop_image_read_ms",
     "crop_extract_ms",
@@ -194,6 +195,7 @@ def _print_summary(summary: dict) -> None:
         f"full={summary['timing_ms']['initial_detection_ms']['mean']:.1f}ms "
         f"rollout={summary['timing_ms']['rollout_ms']['mean']:.1f}ms "
         f"prefilter={summary['timing_ms']['roi_prefilter_ms']['mean']:.1f}ms "
+        f"gate={summary['timing_ms']['candidate_evaluation_ms']['mean']:.1f}ms "
         f"crop={summary['timing_ms']['crop_inference_ms']['mean']:.1f}ms "
         f"merge={summary['timing_ms']['merge_ms']['mean']:.1f}ms"
     )

@@ -30,6 +30,7 @@ from rl_sahi.inference.merge import (
     DEFAULT_CROSS_CLASS_DUPLICATE_IOU,
     DEFAULT_CROSS_CLASS_DUPLICATE_IOS,
     accepts_novel_detections,
+    merge_predictions,
     merge_predictions_with_sources,
     _novel_candidate_detections_after_merge,
     new_detection_gain_after_merge,
@@ -308,6 +309,98 @@ def _new_detection_stats(
             reliability_enabled,
         ),
         candidate_reliability=candidate_reliability,
+    )
+
+
+def _merged_previous_predictions(
+    full_boxes: np.ndarray,
+    full_scores: np.ndarray,
+    full_classes: np.ndarray,
+    slice_boxes_parts: list[np.ndarray],
+    slice_scores_parts: list[np.ndarray],
+    slice_classes_parts: list[np.ndarray],
+    slice_reliability_parts: list[np.ndarray],
+    image_shape: tuple[int, int],
+    merge_iou: float,
+    cross_class_duplicate_iou: float | None,
+    cross_class_duplicate_ios: float | None,
+    use_wbf: bool,
+    nms_type: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Merge the current accepted predictions once for ROI acceptance checks."""
+    return merge_predictions(
+        image_shape,
+        merge_iou,
+        [full_boxes, *slice_boxes_parts],
+        [full_scores, *slice_scores_parts],
+        [full_classes, *slice_classes_parts],
+        use_wbf=use_wbf,
+        nms_type=nms_type,
+        cross_class_duplicate_iou=cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cross_class_duplicate_ios,
+        reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            include=True,
+        ),
+    )
+
+
+def _evaluate_candidate_merge(
+    full_boxes: np.ndarray,
+    full_scores: np.ndarray,
+    full_classes: np.ndarray,
+    slice_boxes_parts: list[np.ndarray],
+    slice_scores_parts: list[np.ndarray],
+    slice_classes_parts: list[np.ndarray],
+    slice_reliability_parts: list[np.ndarray],
+    candidate_boxes: np.ndarray,
+    candidate_scores: np.ndarray,
+    candidate_classes: np.ndarray,
+    candidate_reliability: np.ndarray,
+    image_shape: tuple[int, int],
+    cfg: InferenceConfig,
+    merged_previous: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, float, float]:
+    """Evaluate a crop once and return both its novelty and gate statistics.
+
+    The old path computed this novelty once to decide whether to accept a crop
+    and a second time to prepare accepted boxes for the final merge.  Keeping
+    the returned boxes removes that duplicate NMS work without changing the
+    gate or final-prediction semantics.
+    """
+    boxes, scores, classes = _novel_candidate_detections_after_merge(
+        image_shape,
+        cfg.merge_iou,
+        [full_boxes, *slice_boxes_parts],
+        [full_scores, *slice_scores_parts],
+        [full_classes, *slice_classes_parts],
+        candidate_boxes,
+        candidate_scores,
+        candidate_classes,
+        duplicate_iou=cfg.duplicate_iou,
+        cross_class_duplicate_iou=cfg.cross_class_duplicate_iou,
+        cross_class_duplicate_ios=cfg.cross_class_duplicate_ios,
+        use_wbf=cfg.use_wbf,
+        nms_type=cfg.nms_type,
+        previous_reliability_parts=_previous_reliability_parts(
+            full_boxes,
+            slice_reliability_parts,
+            include=True,
+        ),
+        candidate_reliability=candidate_reliability,
+        merged_previous=merged_previous,
+    )
+    if len(boxes) == 0:
+        return boxes, scores, classes, 0, 0.0, 0.0
+    clipped_scores = np.clip(scores, 0.0, 1.0)
+    return (
+        boxes,
+        scores,
+        classes,
+        int(len(boxes)),
+        float(clipped_scores.sum()),
+        float(clipped_scores.max()),
     )
 
 
@@ -674,6 +767,7 @@ def _infer_with_loaded(
         "rollout_ms": 0.0,
         "crop_inference_ms": 0.0,
         "roi_prefilter_ms": 0.0,
+        "candidate_evaluation_ms": 0.0,
         "merge_ms": 0.0,
         "write_outputs_ms": 0.0,
         "total_ms": 0.0,
@@ -736,6 +830,7 @@ def _infer_with_loaded(
     roi_candidate_count = 0
     roi_prefilter_dropped = 0
     global_stop_reason: str | None = None
+    merged_previous_cache: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
     if cfg.batched_inference:
         # ── BATCHED MODE: 3-phase pipeline ──────────────────────────
@@ -881,20 +976,47 @@ def _infer_with_loaded(
                 )
                 raw_detection_count = int(len(boxes_i))
                 reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
-                new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
-                    full_boxes, full_scores, full_classes,
-                    slice_boxes_all, slice_scores_all, slice_classes_all,
-                    boxes_i, scores_i, classes_i,
+                candidate_evaluation_start = time.perf_counter()
+                if merged_previous_cache is None:
+                    merged_previous_cache = _merged_previous_predictions(
+                        full_boxes,
+                        full_scores,
+                        full_classes,
+                        slice_boxes_all,
+                        slice_scores_all,
+                        slice_classes_all,
+                        slice_reliability_all,
+                        det.image_shape,
+                        cfg.merge_iou,
+                        cfg.cross_class_duplicate_iou,
+                        cfg.cross_class_duplicate_ios,
+                        cfg.use_wbf,
+                        cfg.nms_type,
+                    )
+                (
+                    novel_boxes_i,
+                    novel_scores_i,
+                    novel_classes_i,
+                    new_detection_gain,
+                    new_detection_utility,
+                    new_detection_max_score,
+                ) = _evaluate_candidate_merge(
+                    full_boxes,
+                    full_scores,
+                    full_classes,
+                    slice_boxes_all,
+                    slice_scores_all,
+                    slice_classes_all,
+                    slice_reliability_all,
+                    boxes_i,
+                    scores_i,
+                    classes_i,
+                    reliability_i,
                     det.image_shape,
-                    cfg.merge_iou,
-                    cfg.duplicate_iou,
-                    cfg.cross_class_duplicate_iou,
-                    cfg.cross_class_duplicate_ios,
-                    use_wbf=cfg.use_wbf,
-                    nms_type=cfg.nms_type,
-                    slice_reliability_parts=slice_reliability_all,
-                    candidate_reliability=reliability_i,
+                    cfg,
+                    merged_previous_cache,
                 )
+                timing["candidate_evaluation_ms"] += (time.perf_counter() - candidate_evaluation_start) * 1000.0
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
                     new_detection_max_score, cfg,
@@ -906,34 +1028,23 @@ def _infer_with_loaded(
                 merge_classes_i = classes_i
                 merge_reliability_i = reliability_i
                 if accepted:
-                    (
-                        merge_boxes_i,
-                        merge_scores_i,
-                        merge_classes_i,
-                        merge_reliability_i,
-                    ) = _slice_predictions_for_merge(
-                        full_boxes,
-                        full_scores,
-                        full_classes,
-                        slice_boxes_all,
-                        slice_scores_all,
-                        slice_classes_all,
-                        slice_reliability_all,
-                        boxes_i,
-                        scores_i,
-                        classes_i,
-                        reliability_i,
-                        roi,
-                        det.image_shape,
-                        info,
-                        cfg,
-                    )
+                    if cfg.append_novel_only:
+                        merge_boxes_i = novel_boxes_i
+                        merge_scores_i = novel_scores_i
+                        merge_classes_i = novel_classes_i
+                        merge_reliability_i = _crop_box_reliability(
+                            merge_boxes_i,
+                            roi,
+                            det.image_shape,
+                            info,
+                        )
                     accepted_rois.append(roi)
                     slice_index = len(accepted_rois)
                     slice_boxes_all.append(merge_boxes_i)
                     slice_scores_all.append(merge_scores_i)
                     slice_classes_all.append(merge_classes_i)
                     slice_reliability_all.append(merge_reliability_i)
+                    merged_previous_cache = None
                 else:
                     rejected_rois.append(roi)
                 slice_meta.append(
@@ -1075,26 +1186,49 @@ def _infer_with_loaded(
                 )
                 raw_detection_count = int(len(boxes_i))
                 reliability_i = _crop_box_reliability(boxes_i, roi, det.image_shape, info)
-                new_detection_gain, new_detection_utility, new_detection_max_score = _new_detection_stats(
+                candidate_evaluation_start = time.perf_counter()
+                if merged_previous_cache is None:
+                    merged_previous_cache = _merged_previous_predictions(
+                        full_boxes,
+                        full_scores,
+                        full_classes,
+                        slice_boxes_all,
+                        slice_scores_all,
+                        slice_classes_all,
+                        slice_reliability_all,
+                        det.image_shape,
+                        cfg.merge_iou,
+                        cfg.cross_class_duplicate_iou,
+                        cfg.cross_class_duplicate_ios,
+                        cfg.use_wbf,
+                        cfg.nms_type,
+                    )
+                (
+                    novel_boxes_i,
+                    novel_scores_i,
+                    novel_classes_i,
+                    new_detection_gain,
+                    new_detection_utility,
+                    new_detection_max_score,
+                ) = _evaluate_candidate_merge(
                     full_boxes,
                     full_scores,
                     full_classes,
                     slice_boxes_all,
                     slice_scores_all,
                     slice_classes_all,
+                    slice_reliability_all,
                     boxes_i,
                     scores_i,
                     classes_i,
+                    reliability_i,
                     det.image_shape,
-                    cfg.merge_iou,
-                    cfg.duplicate_iou,
-                    cfg.cross_class_duplicate_iou,
-                    cfg.cross_class_duplicate_ios,
-                    use_wbf=cfg.use_wbf,
-                    nms_type=cfg.nms_type,
-                    slice_reliability_parts=slice_reliability_all,
-                    candidate_reliability=reliability_i,
+                    cfg,
+                    merged_previous_cache,
                 )
+                timing["candidate_evaluation_ms"] += (
+                    time.perf_counter() - candidate_evaluation_start
+                ) * 1000.0
                 rejection_reason = _crop_rejection_reason(
                     len(boxes_i), new_detection_gain, new_detection_utility,
                     new_detection_max_score, cfg,
@@ -1106,28 +1240,16 @@ def _infer_with_loaded(
                 merge_classes_i = classes_i
                 merge_reliability_i = reliability_i
                 if accepted:
-                    (
-                        merge_boxes_i,
-                        merge_scores_i,
-                        merge_classes_i,
-                        merge_reliability_i,
-                    ) = _slice_predictions_for_merge(
-                        full_boxes,
-                        full_scores,
-                        full_classes,
-                        slice_boxes_all,
-                        slice_scores_all,
-                        slice_classes_all,
-                        slice_reliability_all,
-                        boxes_i,
-                        scores_i,
-                        classes_i,
-                        reliability_i,
-                        roi,
-                        det.image_shape,
-                        info,
-                        cfg,
-                    )
+                    if cfg.append_novel_only:
+                        merge_boxes_i = novel_boxes_i
+                        merge_scores_i = novel_scores_i
+                        merge_classes_i = novel_classes_i
+                        merge_reliability_i = _crop_box_reliability(
+                            merge_boxes_i,
+                            roi,
+                            det.image_shape,
+                            info,
+                        )
                     consecutive_rejections = 0
                     accepted_rois.append(roi)
                     slice_index = len(accepted_rois)
@@ -1135,6 +1257,7 @@ def _infer_with_loaded(
                     slice_scores_all.append(merge_scores_i)
                     slice_classes_all.append(merge_classes_i)
                     slice_reliability_all.append(merge_reliability_i)
+                    merged_previous_cache = None
                 else:
                     consecutive_rejections += 1
                     rejected_rois.append(roi)
