@@ -205,6 +205,45 @@ class SliceEnv:
             state_low_mask=low_mask,
         )
 
+    @classmethod
+    def precompute_seed_targets(
+        cls,
+        detection: DetectionCache,
+        env_cfg: EnvConfig,
+        state_cfg: StateConfig,
+        target_classes: tuple[int, ...],
+        class_mapping: ClassMapping,
+        static_context: SliceEnvStaticContext | None,
+        max_attempts: int,
+    ) -> tuple[np.ndarray, ...]:
+        """Return residual-heatmap seeds that are static for one image.
+
+        Initial ranked seeds deliberately ignore prior ROIs.  One ranked
+        heatmap can therefore serve all rollout attempts; history, overlap
+        checks, and the dynamic fallback remain per-attempt in ``_initial_roi``.
+        """
+        attempt_count = max(int(max_attempts), 0)
+        if attempt_count == 0:
+            return ()
+        planner = cls(
+            detection,
+            None,
+            env_cfg=env_cfg,
+            state_cfg=state_cfg,
+            target_classes=target_classes,
+            class_mapping=class_mapping,
+            static_context=static_context,
+            lazy_reset=True,
+        )
+        ranked_targets = planner._heatmap_targets(
+            top_k=max(int(env_cfg.seed_topk), attempt_count),
+            include_previous=False,
+        )
+        return tuple(
+            np.asarray(point, dtype=np.float32).reshape(2).copy()
+            for point, _score in ranked_targets
+        )
+
     def _resolve_box_device(self) -> torch.device | None:
         if not bool(getattr(self.env_cfg, "use_gpu_box_ops", True)):
             return None

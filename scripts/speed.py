@@ -35,6 +35,7 @@ TIMING_KEYS = (
     "initial_result_transfer_ms",
     "rollout_ms",
     "rollout_static_ms",
+    "rollout_seed_cache_ms",
     "rollout_env_init_ms",
     "rollout_state_ms",
     "rollout_valid_ms",

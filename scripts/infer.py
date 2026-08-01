@@ -181,6 +181,7 @@ def main() -> None:
             f"d2h={float(timing.get('crop_result_transfer_ms', 0.0)):.1f}) "
             f"rollout={float(timing.get('rollout_ms', 0.0)):.1f}ms "
             f"(static={float(timing.get('rollout_static_ms', 0.0)):.1f} "
+            f"seed={float(timing.get('rollout_seed_cache_ms', 0.0)):.1f} "
             f"env={float(timing.get('rollout_env_init_ms', 0.0)):.1f} "
             f"state={float(timing.get('rollout_state_ms', 0.0)):.1f} "
             f"valid={float(timing.get('rollout_valid_ms', 0.0)):.1f} "

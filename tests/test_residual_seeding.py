@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rl_sahi.common.boxes import centers
 from rl_sahi.common.cache import DetectionCache
+from rl_sahi.common.class_mapping import ClassMapping
 from rl_sahi.rl.env_config import EnvConfig
 from rl_sahi.rl.slice_env import SliceEnv
 from rl_sahi.rl.state_config import StateConfig
@@ -102,6 +103,69 @@ class ResidualSeedingTest(unittest.TestCase):
             float(np.linalg.norm(first_center - second_center)),
             50.0,
         )
+
+    def test_cached_ranked_seeds_match_per_attempt_initialization(self) -> None:
+        objectness = np.zeros((16, 16), dtype=np.float32)
+        objectness[2, 2] = 1.0
+        objectness[12, 12] = 0.8
+        detection = _detection(
+            np.zeros((0, 4), dtype=np.float32),
+            np.zeros((0,), dtype=np.float32),
+            objectness,
+        )
+        cfg = EnvConfig(
+            residual_objectness_weight=1.0,
+            residual_proposal_weight=0.0,
+            residual_small_weight=0.0,
+            residual_high_conf_penalty=0.0,
+            seed_topk=2,
+            seed_nms_radius=2,
+        )
+        state_cfg = StateConfig(grid_size=16)
+        class_mapping = ClassMapping()
+        static = SliceEnv.build_static_context(
+            detection,
+            state_cfg,
+            (),
+            class_mapping,
+        )
+        cached_targets = SliceEnv.precompute_seed_targets(
+            detection,
+            cfg,
+            state_cfg,
+            (),
+            class_mapping,
+            static,
+            max_attempts=3,
+        )
+
+        self.assertEqual(len(cached_targets), 2)
+        for rank in range(3):
+            eager = SliceEnv(
+                detection,
+                None,
+                env_cfg=cfg,
+                state_cfg=state_cfg,
+                static_context=static,
+                seed_rank=rank,
+                lazy_reset=True,
+            )
+            cached = SliceEnv(
+                detection,
+                None,
+                env_cfg=cfg,
+                state_cfg=state_cfg,
+                static_context=static,
+                seed_rank=rank,
+                seed_target=(cached_targets[rank] if rank < len(cached_targets) else None),
+                lazy_reset=True,
+            )
+            np.testing.assert_array_equal(eager.reset(), cached.reset())
+            np.testing.assert_array_equal(eager.roi, cached.roi)
+            np.testing.assert_array_equal(
+                eager.policy_action_mask(),
+                cached.policy_action_mask(),
+            )
 
     def test_residual_heatmap_excludes_previous_roi(self) -> None:
         objectness = np.zeros((16, 16), dtype=np.float32)

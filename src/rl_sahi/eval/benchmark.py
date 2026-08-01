@@ -733,6 +733,15 @@ def _predict_rl_sahi(
     attempted_rois: list[np.ndarray] = []
     crop_inference_count = 0
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
+    seed_targets = SliceEnv.precompute_seed_targets(
+        det,
+        env_cfg,
+        state_cfg,
+        cfg.target_classes,
+        cfg.class_mapping,
+        env_static,
+        max_attempts,
+    )
 
     if cfg.batched_inference:
         candidate_rois: list[np.ndarray] = []
@@ -755,6 +764,7 @@ def _predict_rl_sahi(
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
                 seed_rank=attempt_idx - 1,
+                seed_target=(seed_targets[attempt_idx - 1] if attempt_idx <= len(seed_targets) else None),
                 lazy_reset=True,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)
@@ -924,6 +934,7 @@ def _predict_rl_sahi(
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
                 seed_rank=attempt_idx - 1,
+                seed_target=(seed_targets[attempt_idx - 1] if attempt_idx <= len(seed_targets) else None),
                 lazy_reset=True,
             )
             roi, _actions, info = rollout_one_slice(policy, env, device_t)

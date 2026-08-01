@@ -782,6 +782,7 @@ def _infer_with_loaded(
         cfg.class_mapping,
     )
     timing["rollout_static_ms"] = (time.perf_counter() - env_static_start) * 1000.0
+    timing["rollout_seed_cache_ms"] = 0.0
     timing["rollout_env_init_ms"] = 0.0
     accepted_rois: list[np.ndarray] = []
     rejected_rois: list[np.ndarray] = []
@@ -824,6 +825,17 @@ def _infer_with_loaded(
         cfg.cross_class_duplicate_ios,
     )
     max_attempts = int(cfg.max_slice_attempts) if cfg.max_slice_attempts > 0 else int(env_cfg.max_slices * 2)
+    seed_cache_start = time.perf_counter()
+    seed_targets = SliceEnv.precompute_seed_targets(
+        det,
+        env_cfg,
+        state_cfg,
+        cfg.target_classes,
+        cfg.class_mapping,
+        env_static,
+        max_attempts,
+    )
+    timing["rollout_seed_cache_ms"] = (time.perf_counter() - seed_cache_start) * 1000.0
     crop_batch_size = max(int(cfg.crop_batch_size), 1)
     crop_prediction_count = 0
     crop_batch_count = 0
@@ -862,6 +874,7 @@ def _infer_with_loaded(
                 class_mapping=cfg.class_mapping,
                 static_context=env_static,
                 seed_rank=attempt_idx - 1,
+                seed_target=(seed_targets[attempt_idx - 1] if attempt_idx <= len(seed_targets) else None),
                 lazy_reset=True,
             )
             timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
@@ -892,7 +905,7 @@ def _infer_with_loaded(
             else:
                 candidate_rois.append((attempt_idx, roi, actions, info))
             attempt_idx += 1
-        timing["rollout_ms"] = timing["rollout_static_ms"] + (
+        timing["rollout_ms"] = timing["rollout_static_ms"] + timing["rollout_seed_cache_ms"] + (
             time.perf_counter() - rollout_start
         ) * 1000.0
 
@@ -1078,7 +1091,7 @@ def _infer_with_loaded(
         stop_attempts = False
         consecutive_rejections = 0
         rejection_limit = max(int(cfg.max_consecutive_rejections), 0)
-        timing["rollout_ms"] = timing["rollout_static_ms"]
+        timing["rollout_ms"] = timing["rollout_static_ms"] + timing["rollout_seed_cache_ms"]
 
         while attempt_idx <= max_attempts and len(accepted_rois) < env_cfg.max_slices and not stop_attempts:
             remaining_attempts = max_attempts - attempt_idx + 1
@@ -1114,6 +1127,7 @@ def _infer_with_loaded(
                     class_mapping=cfg.class_mapping,
                     static_context=env_static,
                     seed_rank=attempt_idx - 1,
+                    seed_target=(seed_targets[attempt_idx - 1] if attempt_idx <= len(seed_targets) else None),
                     lazy_reset=True,
                 )
                 timing["rollout_env_init_ms"] += (time.perf_counter() - env_init_start) * 1000.0
