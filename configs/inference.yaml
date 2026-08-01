@@ -11,7 +11,7 @@ infer:
   min_new_detection_score: 0.1
   duplicate_iou: 0.5
   boundary_margin: 6.0
-  append_novel_only: true
+  append_novel_only: false
   cross_class_duplicate_iou: 0.85
   cross_class_duplicate_ios: 0.95
   max_slice_attempts: 4
