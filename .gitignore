@@ -30,3 +30,4 @@ yolov5l-xs-11.pt
 benchmark_official/
 tmp/
 runs/weight/
+.codex_deps/

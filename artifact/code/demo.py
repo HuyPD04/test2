@@ -141,7 +141,7 @@ def create_info_panel(width: int, height: int, stats: list[tuple[str, str]]) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate 5 RL-SAHI visual outputs from an image link/path.")
-    parser.add_argument("link", nargs="?", default=r"D:\RL-SAHI\data\raw\images\test\0000074_01218_d_0000002.jpg",
+    parser.add_argument("link", nargs="?", default=r"D:\RL-SAHI\data\raw\images\test\0000127_00002_d_0000119.jpg",
                         help="Path or HTTP/HTTPS URL of the input image")
     parser.add_argument("--out-dir", type=Path, default=Path("artifact/output"),
                         help="Directory to save the generated output images")

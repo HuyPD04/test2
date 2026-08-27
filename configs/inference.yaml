@@ -2,7 +2,7 @@ infer:
   full_imgsz: 1280
   slice_imgsz: 512
   full_conf: 0.01
-  output_conf: 0.3
+  output_conf: 0.5
   iou: 0.7
   merge_iou: 0.5
   max_det: 3000

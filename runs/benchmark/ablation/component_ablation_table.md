@@ -7,7 +7,7 @@ Device: `cuda`. Checkpoint file name(s): `best.pt`.
 
 | Variant | Detection map | History map | Hard-region target reward | Cost/overlap penalty | AP | AP50 | AP75 | Recall-small@0.50 | FP/image | Crops/image | Speed (img/s) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| w/o detection map | No | Yes | Yes | Yes | 27.57 | 45.75 | 27.83 | 69.28 | 175.37 | 2.99 | 3.39 |
-| w/o history | Yes | No | Yes | Yes | 27.60 | 45.84 | 27.85 | 69.46 | 177.05 | 2.99 | 3.36 |
-| w/o hard-region target reward | Yes | Yes | No | Yes | 27.63 | 45.84 | 27.89 | 69.38 | 176.69 | 2.99 | 3.37 |
-| w/o cost/overlap | Yes | Yes | Yes | No | 27.60 | 45.83 | 27.91 | 68.88 | 170.76 | 2.97 | 3.54 |
+| w/o detection map | No | Yes | Yes | Yes | 31.86 | 51.66 | 32.73 | 76.43 | 161.47 | 2.99 | 5.65 |
+| w/o history | Yes | No | Yes | Yes | 31.86 | 51.74 | 32.69 | 76.67 | 164.32 | 2.99 | 5.86 |
+| w/o hard-region target reward | Yes | Yes | No | Yes | 31.89 | 51.76 | 32.69 | 76.66 | 163.77 | 3.00 | 5.73 |
+| w/o cost/overlap | Yes | Yes | Yes | No | 31.97 | 51.80 | 32.86 | 76.16 | 159.42 | 2.98 | 5.34 |

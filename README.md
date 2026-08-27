@@ -120,6 +120,9 @@ runs/dqn/resume.pt
 ```powershell
 python scripts\infer.py --split test --limit 20
 python scripts\infer.py --image image.png --visualize
+
+# Hai ảnh không nhãn: YOLO (1280, conf=0.3, IoU=0.5) và RL-SAHI
+python scripts\render_yolo_vs_rl_sahi.py --image image.png
 ```
 
 Acceptance gate mới:
